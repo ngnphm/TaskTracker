@@ -120,25 +120,25 @@ function renderTasks() {
         <label class="checkbox-wrap">
           <input class="task-check" type="checkbox" ${task.checked ? "checked" : ""} />
         </label>
-        <input
+        <textarea
           class="task-title-input ${task.checked ? "is-complete" : ""}"
-          type="text"
-          value="${escapeHtml(task.title)}"
           placeholder="Checklist item"
-        />
-        <div class="task-actions">
-          <button class="mini-button add-subtask-btn" type="button">Sub-task</button>
-          <button class="mini-button delete-task-btn" type="button">Delete</button>
-        </div>
-        <div class="task-meta-row">
-          <label class="meta-group">
-          <span>Due date</span>
-          <input class="meta-input task-due-input" type="date" value="${task.dueDate || ""}" />
-        </label>
-        <label class="meta-group">
-          <span>Completed date</span>
-          <input class="meta-input task-completed-input" type="date" value="${task.completedDate || ""}" />
-        </label>
+        >${escapeHtml(task.title)}</textarea>
+        <div class="task-side">
+          <div class="task-actions">
+            <button class="mini-button add-subtask-btn" type="button">Sub-task</button>
+            <button class="mini-button delete-task-btn" type="button">Delete</button>
+          </div>
+          <div class="task-meta-row">
+            <label class="meta-group">
+              <span>Due</span>
+              <input class="meta-input task-due-input" type="date" value="${task.dueDate || ""}" />
+            </label>
+            <label class="meta-group">
+              <span>Done</span>
+              <input class="meta-input task-completed-input" type="date" value="${task.completedDate || ""}" />
+            </label>
+          </div>
         </div>
       </div>
     `;
@@ -149,7 +149,10 @@ function renderTasks() {
       await persistAndRender("Task updated");
     });
 
-    row.querySelector(".task-title-input").addEventListener("input", async (event) => {
+    const titleInput = row.querySelector(".task-title-input");
+    autoResizeTextarea(titleInput);
+    titleInput.addEventListener("input", async (event) => {
+      autoResizeTextarea(event.target);
       task.title = event.target.value;
       await persistAndRender("Task updated", false);
     });
@@ -245,8 +248,17 @@ function focusTaskById(taskId) {
   requestAnimationFrame(() => {
     if (!taskId) return;
     const input = document.querySelector(`[data-id="${taskId}"] .task-title-input`);
-    if (input) input.focus();
+    if (input) {
+      input.focus();
+      autoResizeTextarea(input);
+    }
   });
+}
+
+function autoResizeTextarea(textarea) {
+  if (!textarea) return;
+  textarea.style.height = "0px";
+  textarea.style.height = `${textarea.scrollHeight}px`;
 }
 
 function escapeHtml(value) {

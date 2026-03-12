@@ -18,7 +18,7 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
-  font-size: 14px;
+  font-size: 12px;
 }
 
 button,
@@ -49,14 +49,14 @@ input {
   justify-content: space-between;
   gap: 16px;
   align-items: center;
-  padding: 24px 36px 20px;
+  padding: 16px 24px 14px;
   border-bottom: 1px solid var(--line);
   background: #faf9f8;
 }
 
 .eyebrow {
   margin: 0 0 6px;
-  font-size: 12px;
+  font-size: 10px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted);
@@ -64,7 +64,7 @@ input {
 
 h1 {
   margin: 0;
-  font-size: 22px;
+  font-size: 18px;
   font-weight: 700;
 }
 
@@ -80,7 +80,8 @@ h1 {
   background: transparent;
   color: var(--muted);
   cursor: pointer;
-  padding: 6px 8px;
+  padding: 4px 6px;
+  font-size: 11px;
 }
 
 .text-button:hover {
@@ -138,9 +139,9 @@ h1 {
 .user-chip {
   display: inline-flex;
   align-items: center;
-  padding: 7px 12px;
+  padding: 5px 9px;
   border-radius: 999px;
-  font-size: 13px;
+  font-size: 11px;
   background: #f3f2f0;
   color: var(--muted);
 }
@@ -151,10 +152,10 @@ h1 {
 }
 
 .progress-panel {
-  padding: 18px 36px;
+  padding: 10px 24px;
   border-bottom: 1px solid var(--line);
   display: grid;
-  gap: 10px;
+  gap: 6px;
 }
 
 .progress-copy {
@@ -164,17 +165,17 @@ h1 {
 }
 
 .progress-copy strong {
-  font-size: 16px;
+  font-size: 13px;
 }
 
 .progress-copy span {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 10px;
 }
 
 .progress-bar {
   width: 100%;
-  height: 8px;
+  height: 6px;
   border-radius: 999px;
   background: #ece9e6;
   overflow: hidden;
@@ -197,10 +198,10 @@ h1 {
 
 .task-main-row {
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) auto minmax(280px, 340px);
-  gap: 14px;
-  align-items: center;
-  padding: 14px 24px;
+  grid-template-columns: 22px minmax(0, 1fr) minmax(170px, 230px);
+  gap: 10px;
+  align-items: start;
+  padding: 8px 16px;
 }
 
 .checkbox-wrap {
@@ -210,8 +211,8 @@ h1 {
 }
 
 .task-check {
-  width: 22px;
-  height: 22px;
+  width: 16px;
+  height: 16px;
   margin: 0;
   accent-color: var(--accent);
 }
@@ -221,10 +222,14 @@ h1 {
   border: 0;
   background: transparent;
   color: var(--text);
-  font-size: 16px;
+  font-size: 12px;
   line-height: 1.25;
   padding: 0;
   min-width: 0;
+  resize: none;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .task-title-input:focus,
@@ -240,7 +245,20 @@ h1 {
 
 .task-actions {
   display: flex;
-  gap: 8px;
+  gap: 5px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.task-side {
+  display: grid;
+  gap: 4px;
+  justify-items: end;
+}
+
+.task-actions {
+  display: flex;
+  gap: 5px;
   align-items: center;
 }
 
@@ -250,8 +268,8 @@ h1 {
   background: #fff;
   color: var(--muted);
   cursor: pointer;
-  padding: 5px 10px;
-  font-size: 12px;
+  padding: 3px 7px;
+  font-size: 10px;
 }
 
 .mini-button:hover {
@@ -260,44 +278,48 @@ h1 {
 }
 
 .task-meta-row {
-  display: contents;
+  display: grid;
+  gap: 3px;
+  justify-items: end;
 }
 
 .meta-group {
   display: grid;
-  gap: 4px;
+  gap: 2px;
+  width: 132px;
 }
 
 .meta-group span {
-  font-size: 10px;
+  font-size: 8px;
   color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
+  text-align: right;
 }
 
 .meta-input {
   border: 1px solid var(--line-strong);
-  border-radius: 10px;
+  border-radius: 8px;
   background: #fff;
   color: var(--text);
-  padding: 7px 10px;
-  font-size: 12px;
+  padding: 4px 6px;
+  font-size: 10px;
   width: 100%;
 }
 
 .new-task-row {
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr);
-  gap: 14px;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 10px;
   align-items: center;
-  padding: 14px 24px;
+  padding: 8px 16px;
 }
 
 .plus-button {
   border: 0;
   background: transparent;
   color: var(--muted);
-  font-size: 34px;
+  font-size: 24px;
   line-height: 1;
   cursor: pointer;
   padding: 0;
@@ -306,7 +328,7 @@ h1 {
 .new-task-input {
   border: 0;
   background: transparent;
-  font-size: 16px;
+  font-size: 12px;
   color: var(--text);
   padding: 0;
 }
@@ -318,7 +340,7 @@ h1 {
 .empty-state {
   padding: 16px 24px;
   color: var(--muted);
-  font-size: 14px;
+  font-size: 12px;
 }
 
 @media (max-width: 900px) {
@@ -331,23 +353,29 @@ h1 {
   }
 
   .task-main-row {
-    grid-template-columns: 28px minmax(0, 1fr);
+    grid-template-columns: 22px minmax(0, 1fr);
+  }
+
+  .task-side {
+    grid-column: 2;
+    justify-items: start;
   }
 
   .task-actions {
-    grid-column: 2;
     justify-content: flex-start;
     flex-wrap: wrap;
   }
 
-  .task-row {
-    border-bottom: 1px solid var(--line);
+  .task-meta-row {
+    justify-items: start;
   }
 
-  .task-meta-row {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-    padding: 0 20px 14px 62px;
+  .meta-group {
+    width: 100%;
+    max-width: 180px;
+  }
+
+  .meta-group span {
+    text-align: left;
   }
 }
