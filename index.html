@@ -8,15 +8,48 @@
   </head>
   <body>
     <main class="app-shell">
-      <section class="checklist-card">
+      <section id="authCard" class="checklist-card auth-card">
+        <header class="checklist-header">
+          <div>
+            <p class="eyebrow">Assignment Tracker</p>
+            <h1 id="authTitle">Sign in</h1>
+          </div>
+        </header>
+
+        <div class="auth-body">
+          <p id="authHint" class="auth-hint">
+            Use the same email and password on any device to load your synced tasks.
+          </p>
+          <form id="authForm" class="auth-form">
+            <input id="authEmail" class="auth-input" type="email" placeholder="Email" autocomplete="email" />
+            <input
+              id="authPassword"
+              class="auth-input"
+              type="password"
+              placeholder="Password"
+              autocomplete="current-password"
+            />
+            <button id="authSubmitBtn" class="primary-button" type="submit">Sign in</button>
+          </form>
+          <button id="authToggleBtn" class="text-button auth-toggle" type="button">
+            Need an account? Create one
+          </button>
+          <p id="authStatus" class="status-text"></p>
+        </div>
+      </section>
+
+      <section id="appCard" class="checklist-card" hidden>
         <header class="checklist-header">
           <div>
             <p class="eyebrow">Assignment Tracker</p>
             <h1 id="pageTitle">Group Assignment</h1>
           </div>
           <div class="header-actions">
+            <span id="userEmail" class="user-chip"></span>
+            <span id="syncStatus" class="sync-chip">Signed out</span>
             <button id="resetDataBtn" class="text-button" type="button">Reset</button>
             <button id="exportBtn" class="text-button" type="button">Export</button>
+            <button id="signOutBtn" class="text-button" type="button">Sign out</button>
           </div>
         </header>
 
@@ -45,6 +78,8 @@
       </section>
     </main>
 
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="./config.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>

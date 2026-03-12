@@ -38,6 +38,11 @@ input {
   overflow: hidden;
 }
 
+.auth-card {
+  max-width: 620px;
+  margin: 32px auto;
+}
+
 .checklist-header {
   display: flex;
   justify-content: space-between;
@@ -65,6 +70,8 @@ h1 {
 .header-actions {
   display: flex;
   gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
 }
 
 .text-button {
@@ -77,6 +84,69 @@ h1 {
 
 .text-button:hover {
   color: var(--text);
+}
+
+.primary-button {
+  border: 0;
+  border-radius: 12px;
+  background: var(--accent);
+  color: white;
+  padding: 12px 16px;
+  cursor: pointer;
+}
+
+.auth-body {
+  padding: 24px 36px 28px;
+}
+
+.auth-hint {
+  margin: 0 0 18px;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.auth-form {
+  display: grid;
+  gap: 12px;
+}
+
+.auth-input {
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  padding: 14px 16px;
+  font-size: 16px;
+}
+
+.auth-toggle {
+  margin-top: 10px;
+  padding-left: 0;
+}
+
+.status-text {
+  min-height: 20px;
+  margin: 10px 0 0;
+  color: var(--muted);
+}
+
+.status-text[data-error="true"] {
+  color: #bf3e35;
+}
+
+.sync-chip,
+.user-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  background: #f3f2f0;
+  color: var(--muted);
+}
+
+.sync-chip[data-error="true"] {
+  background: #fdeceb;
+  color: #bf3e35;
 }
 
 .progress-panel {
