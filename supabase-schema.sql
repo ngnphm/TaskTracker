@@ -208,6 +208,43 @@ as $$
   );
 $$;
 
+create or replace function public.accept_pending_invitations()
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  accepted_count integer := 0;
+begin
+  if auth.uid() is null then
+    return 0;
+  end if;
+
+  insert into public.project_members (project_id, user_id, role)
+  select distinct
+    invitation.project_id,
+    auth.uid(),
+    case
+      when invitation.role in ('owner', 'editor', 'viewer') then invitation.role
+      else 'viewer'
+    end
+  from public.project_invitations invitation
+  where lower(invitation.email) = lower(coalesce(auth.jwt() ->> 'email', ''))
+    and invitation.status = 'pending'
+  on conflict (project_id, user_id) do update
+  set role = excluded.role;
+
+  update public.project_invitations invitation
+  set status = 'accepted'
+  where lower(invitation.email) = lower(coalesce(auth.jwt() ->> 'email', ''))
+    and invitation.status = 'pending';
+
+  get diagnostics accepted_count = row_count;
+  return accepted_count;
+end;
+$$;
+
 create policy "profiles_select"
 on public.profiles
 for select

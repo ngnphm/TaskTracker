@@ -375,12 +375,22 @@ h1 {
 }
 
 .task-main-row {
-  display: grid;
-  grid-template-columns: 18px 18px 18px 22px minmax(0, 1fr) minmax(250px, max-content);
-  gap: 8px;
+  display: flex;
+  gap: 12px;
   align-items: center;
+  justify-content: space-between;
   padding: 8px 16px;
   transition: transform 180ms var(--ease-quick);
+}
+
+.task-primary {
+  display: grid;
+  grid-template-columns: 18px 18px 18px 22px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  flex: 1 1 auto;
+  min-width: 0;
+  cursor: pointer;
 }
 
 .task-detail-row {
@@ -495,7 +505,8 @@ h1 {
   display: grid;
   gap: 6px;
   justify-items: end;
-  min-width: 250px;
+  flex: 0 0 auto;
+  min-width: max-content;
 }
 
 .task-meta-row,
@@ -535,10 +546,6 @@ h1 {
     color 160ms ease,
     background-color 160ms ease,
     box-shadow 160ms ease;
-}
-
-.details-toggle-btn {
-  color: var(--accent);
 }
 
 .mini-button:hover {
@@ -739,13 +746,18 @@ h1 {
   }
 
   .task-main-row {
-    grid-template-columns: 18px 18px 18px 22px minmax(0, 1fr);
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .task-primary {
+    width: 100%;
   }
 
   .task-side {
-    grid-column: 5;
-    min-width: 0;
     justify-items: start;
+    padding-left: 74px;
+    min-width: 0;
   }
 }
 

@@ -410,21 +410,20 @@ function renderTaskRow(task, index) {
 
   row.innerHTML = `
     <div class="task-main-row" style="padding-left:${leftPadding}px">
-      <button class="indent-button collapse-button" type="button" aria-label="Collapse task">${task.collapsed ? "+" : "-"}</button>
-      <button class="indent-button outdent-button" type="button" aria-label="Remove sub-task">←</button>
-      <button class="indent-button indent-action" type="button" aria-label="Make sub-task">→</button>
-      <label class="checkbox-wrap">
-        <input class="task-check" type="checkbox" ${task.status === "done" ? "checked" : ""} />
-      </label>
-      <div class="task-title-wrap">
-        <textarea class="task-title-input ${task.status === "done" ? "is-complete" : ""} ${task.level === 0 ? "is-main-task" : ""}" placeholder="Checklist item">${escapeHtml(task.title)}</textarea>
-        ${getTaskAssigneeLabel(task.id) ? `<span class="assignee-badge">${escapeHtml(getTaskAssigneeLabel(task.id))}</span>` : ""}
+      <div class="task-primary">
+        <button class="indent-button collapse-button" type="button" aria-label="Collapse task">${task.collapsed ? "+" : "-"}</button>
+        <button class="indent-button outdent-button" type="button" aria-label="Remove sub-task">←</button>
+        <button class="indent-button indent-action" type="button" aria-label="Make sub-task">→</button>
+        <label class="checkbox-wrap">
+          <input class="task-check" type="checkbox" ${task.status === "done" ? "checked" : ""} />
+        </label>
+        <div class="task-title-wrap">
+          <textarea class="task-title-input ${task.status === "done" ? "is-complete" : ""} ${task.level === 0 ? "is-main-task" : ""}" placeholder="Checklist item">${escapeHtml(task.title)}</textarea>
+          ${getTaskAssigneeLabel(task.id) ? `<span class="assignee-badge">${escapeHtml(getTaskAssigneeLabel(task.id))}</span>` : ""}
+        </div>
       </div>
       <div class="task-side">
         <div class="task-actions">
-          <button class="mini-button add-subtask-btn" type="button">Sub-task</button>
-          <button class="mini-button details-toggle-btn" type="button">${detailsOpen ? "Hide details" : "More details"}</button>
-          <button class="mini-button archive-task-btn" type="button">${task.archived ? "Restore" : "Archive"}</button>
           <button class="mini-button delete-task-btn" type="button">Delete</button>
         </div>
       </div>
@@ -624,7 +623,15 @@ function wireTaskRow(row, task, index) {
     await persistProjectData(task.collapsed ? "Subtasks collapsed" : "Subtasks expanded");
   });
 
-  row.querySelector(".details-toggle-btn").addEventListener("click", async () => {
+  row.querySelector(".task-primary").addEventListener("click", (event) => {
+    if (
+      event.target.closest(".collapse-button") ||
+      event.target.closest(".outdent-button") ||
+      event.target.closest(".indent-action") ||
+      event.target.closest(".checkbox-wrap")
+    ) {
+      return;
+    }
     if (expandedDetailTaskIds.has(task.id)) {
       expandedDetailTaskIds.delete(task.id);
     } else {
@@ -645,16 +652,6 @@ function wireTaskRow(row, task, index) {
     const maxLevel = state.tasks[index - 1].level + 1;
     task.level = Math.min(task.level + 1, maxLevel);
     await persistProjectData("Task indented");
-  });
-
-  row.querySelector(".add-subtask-btn").addEventListener("click", async () => {
-    addSubtask(index);
-    await persistProjectData("Sub-task added");
-  });
-
-  row.querySelector(".archive-task-btn").addEventListener("click", async () => {
-    task.archived = !task.archived;
-    await persistProjectData(task.archived ? "Task archived" : "Task restored");
   });
 
   row.querySelector(".delete-task-btn").addEventListener("click", async () => {
@@ -764,6 +761,7 @@ function taskRowsForDb() {
 
 async function loadProjects() {
   if (!supabaseClient || !session) return;
+  await acceptPendingInvitations();
   const { data, error } = await supabaseClient
     .from("projects")
     .select("id, name, owner_id, due_date")
@@ -784,6 +782,15 @@ async function loadProjects() {
     saveSelectedProject(projects[0].id);
   }
   await loadProjectData();
+}
+
+async function acceptPendingInvitations() {
+  if (!supabaseClient || !session?.user?.email) return;
+  const { error } = await supabaseClient.rpc("accept_pending_invitations");
+  if (error) {
+    console.error(error);
+    setSyncStatus(`Could not accept invitations: ${error.message}`, true);
+  }
 }
 
 async function loadProjectData() {
