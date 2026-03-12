@@ -1,0 +1,278 @@
+:root {
+  --bg: #f5f5f4;
+  --card: #ffffff;
+  --line: #e8e6e3;
+  --line-strong: #dedbd7;
+  --text: #2d2b28;
+  --muted: #8b8680;
+  --accent: #4f7cff;
+  --accent-soft: #e8efff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.app-shell {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 18px 12px 32px;
+}
+
+.checklist-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  overflow: hidden;
+}
+
+.checklist-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  padding: 24px 36px 20px;
+  border-bottom: 1px solid var(--line);
+  background: #faf9f8;
+}
+
+.eyebrow {
+  margin: 0 0 6px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+h1 {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 700;
+}
+
+.header-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.text-button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 6px 8px;
+}
+
+.text-button:hover {
+  color: var(--text);
+}
+
+.progress-panel {
+  padding: 18px 36px;
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  gap: 10px;
+}
+
+.progress-copy {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.progress-copy strong {
+  font-size: 20px;
+}
+
+.progress-copy span {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.progress-bar {
+  width: 100%;
+  height: 8px;
+  border-radius: 999px;
+  background: #ece9e6;
+  overflow: hidden;
+}
+
+.progress-fill {
+  width: 0;
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), #79a0ff);
+  transition: width 180ms ease;
+}
+
+.task-list {
+  display: grid;
+}
+
+.task-row {
+  border-bottom: 1px solid var(--line);
+}
+
+.task-main-row {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: center;
+  padding: 20px 36px;
+}
+
+.checkbox-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.task-check {
+  width: 30px;
+  height: 30px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.task-title-input {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 20px;
+  line-height: 1.35;
+  padding: 0;
+  min-width: 0;
+}
+
+.task-title-input:focus,
+.meta-input:focus,
+.new-task-input:focus {
+  outline: none;
+}
+
+.task-title-input.is-complete {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.task-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.mini-button {
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 7px 12px;
+  font-size: 13px;
+}
+
+.mini-button:hover {
+  color: var(--text);
+  border-color: #cfcac4;
+}
+
+.task-meta-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 280px));
+  gap: 14px;
+  padding: 0 36px 18px 88px;
+}
+
+.meta-group {
+  display: grid;
+  gap: 6px;
+}
+
+.meta-group span {
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.meta-input {
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--text);
+  padding: 10px 12px;
+}
+
+.new-task-row {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 18px;
+  align-items: center;
+  padding: 20px 36px;
+}
+
+.plus-button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 44px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+
+.new-task-input {
+  border: 0;
+  background: transparent;
+  font-size: 20px;
+  color: var(--text);
+  padding: 0;
+}
+
+.new-task-input::placeholder {
+  color: #9b958f;
+}
+
+.empty-state {
+  padding: 20px 36px;
+  color: var(--muted);
+  font-size: 18px;
+}
+
+@media (max-width: 900px) {
+  .checklist-header,
+  .progress-panel,
+  .task-main-row,
+  .new-task-row {
+    padding-left: 20px;
+    padding-right: 20px;
+  }
+
+  .task-main-row {
+    grid-template-columns: 34px minmax(0, 1fr);
+  }
+
+  .task-actions {
+    grid-column: 2;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .task-meta-row {
+    grid-template-columns: 1fr;
+    padding-left: 72px;
+    padding-right: 20px;
+  }
+}

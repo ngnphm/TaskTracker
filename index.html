@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Group Assignment Tracker</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="checklist-card">
+        <header class="checklist-header">
+          <div>
+            <p class="eyebrow">Assignment Tracker</p>
+            <h1 id="pageTitle">Group Assignment</h1>
+          </div>
+          <div class="header-actions">
+            <button id="resetDataBtn" class="text-button" type="button">Reset</button>
+            <button id="exportBtn" class="text-button" type="button">Export</button>
+          </div>
+        </header>
+
+        <section class="progress-panel">
+          <div class="progress-copy">
+            <strong id="progressPercent">0%</strong>
+            <span id="taskCount">0/0 tasks complete</span>
+          </div>
+          <div class="progress-bar">
+            <div id="progressFill" class="progress-fill"></div>
+          </div>
+        </section>
+
+        <section id="taskList" class="task-list"></section>
+
+        <form id="newTaskForm" class="new-task-row">
+          <button class="plus-button" type="submit" aria-label="Add task">+</button>
+          <input
+            id="newTaskTitle"
+            class="new-task-input"
+            type="text"
+            placeholder="New checklist item"
+            autocomplete="off"
+          />
+        </form>
+      </section>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
