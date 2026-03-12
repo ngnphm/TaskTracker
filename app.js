@@ -25,8 +25,13 @@ const dom = {
   exportBtn: document.querySelector("#exportBtn"),
   resetDataBtn: document.querySelector("#resetDataBtn"),
   projectSelect: document.querySelector("#projectSelect"),
+  openProjectModalBtn: document.querySelector("#openProjectModalBtn"),
+  openMilestoneModalBtn: document.querySelector("#openMilestoneModalBtn"),
+  openMeetingModalBtn: document.querySelector("#openMeetingModalBtn"),
+  openCollaboratorModalBtn: document.querySelector("#openCollaboratorModalBtn"),
   projectForm: document.querySelector("#projectForm"),
   projectNameInput: document.querySelector("#projectNameInput"),
+  projectDueInput: document.querySelector("#projectDueInput"),
   milestoneForm: document.querySelector("#milestoneForm"),
   milestoneTitleInput: document.querySelector("#milestoneTitleInput"),
   milestoneDueInput: document.querySelector("#milestoneDueInput"),
@@ -36,6 +41,8 @@ const dom = {
   inviteForm: document.querySelector("#inviteForm"),
   inviteEmailInput: document.querySelector("#inviteEmailInput"),
   inviteRoleInput: document.querySelector("#inviteRoleInput"),
+  modalBackdrop: document.querySelector("#modalBackdrop"),
+  projectDueSummary: document.querySelector("#projectDueSummary"),
   memberList: document.querySelector("#memberList"),
   milestoneList: document.querySelector("#milestoneList"),
   dueSoonList: document.querySelector("#dueSoonList"),
@@ -69,6 +76,7 @@ let authMode = "signin";
 let projects = [];
 let state = loadLocalState();
 let selectedProjectId = localStorage.getItem("capstone-selected-project-id") || "";
+const expandedDetailTaskIds = new Set();
 
 function loadLocalState() {
   const saved = localStorage.getItem(STORAGE_KEY);
@@ -93,6 +101,7 @@ function saveSelectedProject(projectId) {
 
 function resetProjectState() {
   state = structuredClone(defaultState);
+  expandedDetailTaskIds.clear();
 }
 
 function createTask(title = "", level = 0) {
@@ -119,6 +128,20 @@ function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
 
+function normalizeDateValue(value) {
+  if (!value) return "";
+  const stringValue = String(value).trim();
+  const isoMatch = stringValue.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (isoMatch) return isoMatch[1];
+  const parsed = new Date(stringValue);
+  return Number.isNaN(parsed.getTime()) ? "" : parsed.toISOString().slice(0, 10);
+}
+
+function nullableDateValue(value) {
+  const normalized = normalizeDateValue(value);
+  return normalized || null;
+}
+
 function setSyncStatus(message, isError = false) {
   dom.syncStatus.textContent = message;
   dom.syncStatus.dataset.error = isError ? "true" : "false";
@@ -133,8 +156,35 @@ function getProjectName() {
   return projects.find((project) => project.id === selectedProjectId)?.name || "Projects";
 }
 
+function getSelectedProject() {
+  return projects.find((project) => project.id === selectedProjectId) || null;
+}
+
+function openModal(targetId) {
+  dom.modalBackdrop.hidden = false;
+  ["projectModal", "milestoneModal", "meetingModal", "collaboratorModal"].forEach((id) => {
+    const element = document.querySelector(`#${id}`);
+    element.hidden = id !== targetId;
+  });
+}
+
+function closeModal() {
+  dom.modalBackdrop.hidden = true;
+  ["projectModal", "milestoneModal", "meetingModal", "collaboratorModal"].forEach((id) => {
+    const element = document.querySelector(`#${id}`);
+    element.hidden = true;
+  });
+}
+
 function getTaskAssigneeId(taskId) {
   return state.assignees.find((entry) => entry.task_id === taskId)?.user_id || "";
+}
+
+function getTaskAssigneeLabel(taskId) {
+  const assigneeId = getTaskAssigneeId(taskId);
+  if (!assigneeId) return "";
+  const member = state.members.find((entry) => entry.user_id === assigneeId);
+  return member?.display_name || member?.email || "";
 }
 
 function getTaskDependencyId(taskId) {
@@ -226,6 +276,20 @@ function renderMembers() {
   });
 }
 
+function renderProjectDue() {
+  dom.projectDueSummary.innerHTML = "";
+  const project = getSelectedProject();
+  if (!project?.due_date) {
+    dom.projectDueSummary.innerHTML = '<div class="muted-line">No project due date</div>';
+    return;
+  }
+
+  const item = document.createElement("div");
+  item.className = `list-item ${project.due_date < todayISO() ? "is-overdue" : ""}`;
+  item.textContent = project.due_date;
+  dom.projectDueSummary.appendChild(item);
+}
+
 function renderMilestones() {
   dom.milestoneList.innerHTML = "";
   if (!state.milestones.length) {
@@ -303,6 +367,7 @@ function renderTaskRow(task, index) {
   const row = document.createElement("article");
   row.className = `task-row ${isOverdue(task) ? "is-overdue" : ""}`;
   row.dataset.id = task.id;
+  const detailsOpen = expandedDetailTaskIds.has(task.id);
 
   const leftPadding = 16 + task.level * 24;
   const milestoneOptions = [
@@ -351,43 +416,47 @@ function renderTaskRow(task, index) {
       <label class="checkbox-wrap">
         <input class="task-check" type="checkbox" ${task.status === "done" ? "checked" : ""} />
       </label>
-      <textarea class="task-title-input ${task.status === "done" ? "is-complete" : ""} ${task.level === 0 ? "is-main-task" : ""}" placeholder="Checklist item">${escapeHtml(task.title)}</textarea>
+      <div class="task-title-wrap">
+        <textarea class="task-title-input ${task.status === "done" ? "is-complete" : ""} ${task.level === 0 ? "is-main-task" : ""}" placeholder="Checklist item">${escapeHtml(task.title)}</textarea>
+        ${getTaskAssigneeLabel(task.id) ? `<span class="assignee-badge">${escapeHtml(getTaskAssigneeLabel(task.id))}</span>` : ""}
+      </div>
       <div class="task-side">
-        <div class="task-meta-row">
-          <label class="meta-group">
-            <span>Status</span>
-            <select class="meta-input task-status-input">
-              <option value="not_started" ${task.status === "not_started" ? "selected" : ""}>Not started</option>
-              <option value="in_progress" ${task.status === "in_progress" ? "selected" : ""}>In progress</option>
-              <option value="blocked" ${task.status === "blocked" ? "selected" : ""}>Blocked</option>
-              <option value="done" ${task.status === "done" ? "selected" : ""}>Done</option>
-            </select>
-          </label>
-          <label class="meta-group">
-            <span>Priority</span>
-            <select class="meta-input task-priority-input">
-              <option value="low" ${task.priority === "low" ? "selected" : ""}>Low</option>
-              <option value="medium" ${task.priority === "medium" ? "selected" : ""}>Medium</option>
-              <option value="high" ${task.priority === "high" ? "selected" : ""}>High</option>
-            </select>
-          </label>
-          <label class="meta-group">
-            <span>Due</span>
-            <input class="meta-input task-due-input" type="date" value="${task.due_date || ""}" />
-          </label>
-          <label class="meta-group">
-            <span>Done</span>
-            <input class="meta-input task-done-input" type="date" value="${task.completed_date || ""}" />
-          </label>
-        </div>
         <div class="task-actions">
           <button class="mini-button add-subtask-btn" type="button">Sub-task</button>
+          <button class="mini-button details-toggle-btn" type="button">${detailsOpen ? "Hide details" : "More details"}</button>
           <button class="mini-button archive-task-btn" type="button">${task.archived ? "Restore" : "Archive"}</button>
           <button class="mini-button delete-task-btn" type="button">Delete</button>
         </div>
       </div>
     </div>
-    <div class="task-detail-row" style="padding-left:${leftPadding + 74}px">
+    <div class="task-detail-row" style="padding-left:${leftPadding + 74}px" ${detailsOpen ? "" : "hidden"}>
+      <div class="task-meta-row">
+        <label class="meta-group">
+          <span>Status</span>
+          <select class="meta-input task-status-input">
+            <option value="not_started" ${task.status === "not_started" ? "selected" : ""}>Not started</option>
+            <option value="in_progress" ${task.status === "in_progress" ? "selected" : ""}>In progress</option>
+            <option value="blocked" ${task.status === "blocked" ? "selected" : ""}>Blocked</option>
+            <option value="done" ${task.status === "done" ? "selected" : ""}>Done</option>
+          </select>
+        </label>
+        <label class="meta-group">
+          <span>Priority</span>
+          <select class="meta-input task-priority-input">
+            <option value="low" ${task.priority === "low" ? "selected" : ""}>Low</option>
+            <option value="medium" ${task.priority === "medium" ? "selected" : ""}>Medium</option>
+            <option value="high" ${task.priority === "high" ? "selected" : ""}>High</option>
+          </select>
+        </label>
+        <label class="meta-group">
+          <span>Due</span>
+          <input class="meta-input task-due-input" type="date" value="${normalizeDateValue(task.due_date)}" />
+        </label>
+        <label class="meta-group">
+          <span>Done</span>
+          <input class="meta-input task-done-input" type="date" value="${normalizeDateValue(task.completed_date)}" />
+        </label>
+      </div>
       <textarea class="detail-textarea task-description-input" placeholder="Description / notes">${escapeHtml(task.description || "")}</textarea>
       <div class="detail-grid">
         <label class="meta-group">
@@ -481,6 +550,7 @@ function renderApp() {
   dom.pageTitle.textContent = getProjectName();
   renderAuth();
   renderProjects();
+  renderProjectDue();
   renderMembers();
   renderMilestones();
   renderMeetings();
@@ -552,6 +622,15 @@ function wireTaskRow(row, task, index) {
   row.querySelector(".collapse-button").addEventListener("click", async () => {
     task.collapsed = !task.collapsed;
     await persistProjectData(task.collapsed ? "Subtasks collapsed" : "Subtasks expanded");
+  });
+
+  row.querySelector(".details-toggle-btn").addEventListener("click", async () => {
+    if (expandedDetailTaskIds.has(task.id)) {
+      expandedDetailTaskIds.delete(task.id);
+    } else {
+      expandedDetailTaskIds.add(task.id);
+    }
+    renderApp();
   });
 
   row.querySelector(".outdent-button").disabled = task.level === 0;
@@ -642,6 +721,7 @@ function deleteTask(index) {
     deleteCount += 1;
   }
   const idsToDelete = new Set(state.tasks.slice(index, index + deleteCount).map((task) => task.id));
+  idsToDelete.forEach((taskId) => expandedDetailTaskIds.delete(taskId));
   state.tasks.splice(index, deleteCount);
   state.assignees = state.assignees.filter((entry) => !idsToDelete.has(entry.task_id));
   state.dependencies = state.dependencies.filter(
@@ -674,6 +754,8 @@ function setTaskDependency(taskId, dependencyId) {
 function taskRowsForDb() {
   return state.tasks.map((task, index) => ({
     ...task,
+    due_date: nullableDateValue(task.due_date),
+    completed_date: nullableDateValue(task.completed_date),
     project_id: selectedProjectId,
     position: index,
     parent_task_id: null
@@ -684,7 +766,7 @@ async function loadProjects() {
   if (!supabaseClient || !session) return;
   const { data, error } = await supabaseClient
     .from("projects")
-    .select("id, name, owner_id")
+    .select("id, name, owner_id, due_date")
     .order("created_at", { ascending: true });
   if (error) {
     console.error(error);
@@ -788,8 +870,15 @@ async function loadProjectData() {
 
   const profilesById = new Map((profilesResult.data || []).map((profile) => [profile.id, profile]));
 
-  state.tasks = tasksResult.data || [];
-  state.milestones = milestonesResult.data || [];
+  state.tasks = (tasksResult.data || []).map((task) => ({
+    ...task,
+    due_date: normalizeDateValue(task.due_date),
+    completed_date: normalizeDateValue(task.completed_date)
+  }));
+  state.milestones = (milestonesResult.data || []).map((milestone) => ({
+    ...milestone,
+    due_date: normalizeDateValue(milestone.due_date)
+  }));
   state.meetings = meetingsResult.data || [];
   state.invitations = invitesResult.data || [];
   state.assignees = assigneesResult.data || [];
@@ -833,6 +922,7 @@ async function persistProjectData(message, rerender = true) {
       const { error } = await supabaseClient.from("milestones").insert(
         state.milestones.map((milestone, index) => ({
           ...milestone,
+          due_date: nullableDateValue(milestone.due_date),
           project_id: selectedProjectId,
           position: index
         }))
@@ -878,8 +968,8 @@ async function createProject(name) {
   setSyncStatus("Creating project...");
   const { data, error } = await supabaseClient
     .from("projects")
-    .insert([{ owner_id: session.user.id, name: name.trim() }])
-    .select("id, name, owner_id")
+    .insert([{ owner_id: session.user.id, name: name.trim(), due_date: dom.projectDueInput.value || null }])
+    .select("id, name, owner_id, due_date")
     .single();
   if (error) {
     console.error(error);
@@ -889,6 +979,8 @@ async function createProject(name) {
   projects.push(data);
   saveSelectedProject(data.id);
   dom.projectNameInput.value = "";
+  dom.projectDueInput.value = "";
+  closeModal();
   await loadProjectData();
 }
 
@@ -904,6 +996,7 @@ async function addMilestone() {
   });
   dom.milestoneTitleInput.value = "";
   dom.milestoneDueInput.value = "";
+  closeModal();
   await persistProjectData("Milestone added");
 }
 
@@ -920,6 +1013,7 @@ async function addMeeting() {
   });
   dom.meetingTitleInput.value = "";
   dom.meetingDateInput.value = "";
+  closeModal();
   await persistProjectData("Meeting added");
 }
 
@@ -955,6 +1049,7 @@ async function inviteCollaborator() {
   }
 
   dom.inviteEmailInput.value = "";
+  closeModal();
   await loadProjectData();
   setSyncStatus("Collaborator update saved");
 }
@@ -1050,6 +1145,16 @@ dom.projectForm.addEventListener("submit", async (event) => {
 dom.projectSelect.addEventListener("change", async (event) => {
   saveSelectedProject(event.target.value);
   await loadProjectData();
+});
+dom.openProjectModalBtn.addEventListener("click", () => openModal("projectModal"));
+dom.openMilestoneModalBtn.addEventListener("click", () => openModal("milestoneModal"));
+dom.openMeetingModalBtn.addEventListener("click", () => openModal("meetingModal"));
+dom.openCollaboratorModalBtn.addEventListener("click", () => openModal("collaboratorModal"));
+document.querySelectorAll(".close-modal-btn").forEach((button) => {
+  button.addEventListener("click", closeModal);
+});
+dom.modalBackdrop.addEventListener("click", (event) => {
+  if (event.target === dom.modalBackdrop) closeModal();
 });
 dom.milestoneForm.addEventListener("submit", async (event) => {
   event.preventDefault();
