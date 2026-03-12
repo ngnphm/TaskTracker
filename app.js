@@ -38,6 +38,7 @@ const dom = {
   milestoneForm: document.querySelector("#milestoneForm"),
   milestoneTitleInput: document.querySelector("#milestoneTitleInput"),
   milestoneDueInput: document.querySelector("#milestoneDueInput"),
+  taskModalBody: document.querySelector("#taskModalBody"),
   meetingForm: document.querySelector("#meetingForm"),
   meetingTitleInput: document.querySelector("#meetingTitleInput"),
   meetingDateInput: document.querySelector("#meetingDateInput"),
@@ -82,6 +83,7 @@ let selectedProjectId = localStorage.getItem("capstone-selected-project-id") || 
 const expandedDetailTaskIds = new Set();
 let projectChannel = null;
 const realtimeClientId = crypto.randomUUID();
+let activeTaskModalId = null;
 
 function loadLocalState() {
   const saved = localStorage.getItem(STORAGE_KEY);
@@ -182,7 +184,7 @@ function isCurrentUserProjectOwner() {
 
 function openModal(targetId) {
   dom.modalBackdrop.hidden = false;
-  ["projectModal", "milestoneModal", "meetingModal", "collaboratorModal"].forEach((id) => {
+  ["projectModal", "milestoneModal", "meetingModal", "collaboratorModal", "taskModal"].forEach((id) => {
     const element = document.querySelector(`#${id}`);
     element.hidden = id !== targetId;
   });
@@ -190,10 +192,12 @@ function openModal(targetId) {
 
 function closeModal() {
   dom.modalBackdrop.hidden = true;
-  ["projectModal", "milestoneModal", "meetingModal", "collaboratorModal"].forEach((id) => {
+  ["projectModal", "milestoneModal", "meetingModal", "collaboratorModal", "taskModal"].forEach((id) => {
     const element = document.querySelector(`#${id}`);
     element.hidden = true;
   });
+  activeTaskModalId = null;
+  dom.taskModalBody.innerHTML = "";
 }
 
 function getTaskAssigneeId(taskId) {
@@ -225,6 +229,10 @@ function getTaskComments(taskId) {
   return state.comments
     .filter((comment) => comment.task_id === taskId)
     .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+}
+
+function getTaskById(taskId) {
+  return state.tasks.find((task) => task.id === taskId) || null;
 }
 
 function getTaskDepthChildren(taskIndex) {
@@ -430,118 +438,27 @@ function renderTaskRow(task, index) {
   const row = document.createElement("article");
   row.className = `task-row ${isOverdue(task) ? "is-overdue" : ""}`;
   row.dataset.id = task.id;
-  const detailsOpen = expandedDetailTaskIds.has(task.id);
 
   const leftPadding = 16 + task.level * 24;
-  const milestoneOptions = [
-    `<option value="${SELECT_NONE}">No milestone</option>`,
-    ...state.milestones
-      .sort((a, b) => a.position - b.position)
-      .map(
-        (milestone) =>
-          `<option value="${milestone.id}" ${task.milestone_id === milestone.id ? "selected" : ""}>${escapeHtml(milestone.title)}</option>`
-      )
-  ].join("");
-
-  const memberOptions = [
-    `<option value="${SELECT_NONE}">Unassigned</option>`,
-    ...state.members.map(
-      (member) =>
-        `<option value="${member.user_id}" ${getTaskAssigneeId(task.id) === member.user_id ? "selected" : ""}>${escapeHtml(member.display_name || member.email || "Member")}</option>`
-    )
-  ].join("");
-
-  const dependencyOptions = [
-    `<option value="${SELECT_NONE}">No dependency</option>`,
-    ...state.tasks
-      .filter((candidate) => candidate.id !== task.id)
-      .map(
-        (candidate) =>
-          `<option value="${candidate.id}" ${getTaskDependencyId(task.id) === candidate.id ? "selected" : ""}>${escapeHtml(candidate.title || "Untitled task")}</option>`
-      )
-  ].join("");
-
-  const commentsMarkup = getTaskComments(task.id)
-    .map((comment) => {
-      const author =
-        state.members.find((member) => member.user_id === comment.user_id)?.display_name ||
-        state.members.find((member) => member.user_id === comment.user_id)?.email ||
-        "Member";
-      return `<div class="comment-item"><strong>${escapeHtml(author)}</strong><span>${escapeHtml(comment.body)}</span></div>`;
-    })
-    .join("");
 
   row.innerHTML = `
-    <div class="task-main-row" style="padding-left:${leftPadding}px">
-      <div class="task-primary">
+    <div class="task-main-row">
+      <button class="inline-delete-task-button" type="button" aria-label="Delete task">×</button>
+      <div class="task-primary" style="padding-left:${leftPadding}px">
         <button class="indent-button collapse-button" type="button" aria-label="Collapse task">${task.collapsed ? "+" : "-"}</button>
         <button class="indent-button outdent-button" type="button" aria-label="Remove sub-task">←</button>
         <button class="indent-button indent-action" type="button" aria-label="Make sub-task">→</button>
         <label class="checkbox-wrap">
           <input class="task-check" type="checkbox" ${task.status === "done" ? "checked" : ""} />
         </label>
+        <button class="inline-add-subtask-button ${task.status === "done" ? "is-complete" : ""}" type="button" aria-label="Add sub-task">+</button>
         <div class="task-title-wrap">
-          <textarea class="task-title-input ${task.status === "done" ? "is-complete" : ""} ${task.level === 0 ? "is-main-task" : ""}" placeholder="Checklist item">${escapeHtml(task.title)}</textarea>
-          ${getTaskAssigneeLabel(task.id) ? `<span class="assignee-badge">${escapeHtml(getTaskAssigneeLabel(task.id))}</span>` : ""}
-          ${task.status === "done" && getTaskCompleterLabel(task) ? `<span class="completion-badge">✓ ${escapeHtml(getTaskCompleterLabel(task))}</span>` : ""}
+          <textarea class="task-title-input ${task.status === "done" ? "is-complete" : ""} task-level-${Math.min(task.level, 4)}" placeholder="Checklist item">${escapeHtml(task.title)}</textarea>
+          <div class="task-badges">
+            ${getTaskAssigneeLabel(task.id) ? `<span class="assignee-badge">${escapeHtml(getTaskAssigneeLabel(task.id))}</span>` : ""}
+            ${task.status === "done" && getTaskCompleterLabel(task) ? `<span class="completion-badge">✓ ${escapeHtml(getTaskCompleterLabel(task))}</span>` : ""}
+          </div>
         </div>
-      </div>
-      <div class="task-side">
-        <div class="task-actions">
-          <button class="mini-button delete-task-btn" type="button">Delete</button>
-        </div>
-      </div>
-    </div>
-    <div class="task-detail-row" style="padding-left:${leftPadding + 74}px" ${detailsOpen ? "" : "hidden"}>
-      <div class="task-meta-row">
-        <label class="meta-group">
-          <span>Status</span>
-          <select class="meta-input task-status-input">
-            <option value="not_started" ${task.status === "not_started" ? "selected" : ""}>Not started</option>
-            <option value="in_progress" ${task.status === "in_progress" ? "selected" : ""}>In progress</option>
-            <option value="blocked" ${task.status === "blocked" ? "selected" : ""}>Blocked</option>
-            <option value="done" ${task.status === "done" ? "selected" : ""}>Done</option>
-          </select>
-        </label>
-        <label class="meta-group">
-          <span>Priority</span>
-          <select class="meta-input task-priority-input">
-            <option value="low" ${task.priority === "low" ? "selected" : ""}>Low</option>
-            <option value="medium" ${task.priority === "medium" ? "selected" : ""}>Medium</option>
-            <option value="high" ${task.priority === "high" ? "selected" : ""}>High</option>
-          </select>
-        </label>
-        <label class="meta-group">
-          <span>Due</span>
-          <input class="meta-input task-due-input" type="date" value="${normalizeDateValue(task.due_date)}" />
-        </label>
-        <label class="meta-group">
-          <span>Done</span>
-          <input class="meta-input task-done-input" type="date" value="${normalizeDateValue(task.completed_date)}" />
-        </label>
-      </div>
-      <textarea class="detail-textarea task-description-input" placeholder="Description / notes">${escapeHtml(task.description || "")}</textarea>
-      <div class="detail-grid">
-        <label class="meta-group">
-          <span>Milestone</span>
-          <select class="meta-input task-milestone-input">${milestoneOptions}</select>
-        </label>
-        <label class="meta-group">
-          <span>Assignee</span>
-          <select class="meta-input task-assignee-input">${memberOptions}</select>
-        </label>
-        <label class="meta-group">
-          <span>Dependency</span>
-          <select class="meta-input task-dependency-input">${dependencyOptions}</select>
-        </label>
-      </div>
-      <div class="comments-block">
-        <div class="dashboard-title small">Comments</div>
-        <div class="comment-list">${commentsMarkup || '<div class="muted-line">No comments</div>'}</div>
-        <form class="comment-form">
-          <input class="project-input comment-input" type="text" placeholder="Add comment" />
-          <button class="mini-button" type="submit">Comment</button>
-        </form>
       </div>
     </div>
   `;
@@ -624,18 +541,32 @@ function renderApp() {
   saveLocalState();
 }
 
+function focusTaskTitle(taskId, cursorPosition = null) {
+  const input = document.querySelector(`.task-row[data-id="${taskId}"] .task-title-input`);
+  if (!input) return;
+  autoResizeTextarea(input);
+  input.focus();
+  const position = typeof cursorPosition === "number" ? cursorPosition : input.value.length;
+  try {
+    input.setSelectionRange(position, position);
+  } catch (_error) {
+    // Ignore selection issues on unfocused or unsupported states.
+  }
+}
+
 function wireTaskRow(row, task, index) {
   const titleInput = row.querySelector(".task-title-input");
   autoResizeTextarea(titleInput);
+  titleInput.addEventListener("focus", () => {
+    autoResizeTextarea(titleInput);
+  });
+  titleInput.addEventListener("click", () => {
+    autoResizeTextarea(titleInput);
+  });
   titleInput.addEventListener("input", async (event) => {
     autoResizeTextarea(event.target);
     task.title = event.target.value;
     await persistProjectData("Task updated", false);
-  });
-
-  row.querySelector(".task-description-input").addEventListener("input", async (event) => {
-    task.description = event.target.value;
-    await persistProjectData("Description saved", false);
   });
 
   row.querySelector(".task-check").addEventListener("change", async (event) => {
@@ -645,66 +576,26 @@ function wireTaskRow(row, task, index) {
     await persistProjectData("Task updated");
   });
 
-  row.querySelector(".task-status-input").addEventListener("change", async (event) => {
-    task.status = event.target.value;
-    task.completed_date = task.status === "done" ? task.completed_date || todayISO() : "";
-    task.completed_by = task.status === "done" ? task.completed_by || session?.user?.id || null : null;
-    if (task.status !== "done") task.completed_date = "";
-    await persistProjectData("Status saved");
-  });
-
-  row.querySelector(".task-priority-input").addEventListener("change", async (event) => {
-    task.priority = event.target.value;
-    await persistProjectData("Priority saved", false);
-  });
-
-  row.querySelector(".task-due-input").addEventListener("input", async (event) => {
-    task.due_date = event.target.value;
-    await persistProjectData("Due date saved", false);
-  });
-
-  row.querySelector(".task-done-input").addEventListener("input", async (event) => {
-    task.completed_date = event.target.value;
-    task.status = event.target.value ? "done" : "not_started";
-    task.completed_by = event.target.value ? task.completed_by || session?.user?.id || null : null;
-    await persistProjectData("Completion saved");
-  });
-
-  row.querySelector(".task-milestone-input").addEventListener("change", async (event) => {
-    task.milestone_id = event.target.value === SELECT_NONE ? null : event.target.value;
-    await persistProjectData("Milestone saved", false);
-  });
-
-  row.querySelector(".task-assignee-input").addEventListener("change", async (event) => {
-    setTaskAssignee(task.id, event.target.value === SELECT_NONE ? null : event.target.value);
-    await persistProjectData("Assignee saved", false);
-  });
-
-  row.querySelector(".task-dependency-input").addEventListener("change", async (event) => {
-    setTaskDependency(task.id, event.target.value === SELECT_NONE ? null : event.target.value);
-    await persistProjectData("Dependency saved", false);
-  });
-
   row.querySelector(".collapse-button").addEventListener("click", async () => {
     task.collapsed = !task.collapsed;
     await persistProjectData(task.collapsed ? "Subtasks collapsed" : "Subtasks expanded");
   });
 
-  row.querySelector(".task-primary").addEventListener("click", (event) => {
+  row.querySelector(".task-primary").addEventListener("dblclick", (event) => {
     if (
+      event.target.closest(".inline-delete-task-button") ||
       event.target.closest(".collapse-button") ||
       event.target.closest(".outdent-button") ||
       event.target.closest(".indent-action") ||
-      event.target.closest(".checkbox-wrap")
+      event.target.closest(".checkbox-wrap") ||
+      event.target.closest(".inline-add-subtask-button")
     ) {
       return;
     }
-    if (expandedDetailTaskIds.has(task.id)) {
-      expandedDetailTaskIds.delete(task.id);
-    } else {
-      expandedDetailTaskIds.add(task.id);
+    if (!task.title.trim()) {
+      return;
     }
-    renderApp();
+    openTaskModal(task.id);
   });
 
   row.querySelector(".outdent-button").disabled = task.level === 0;
@@ -721,14 +612,183 @@ function wireTaskRow(row, task, index) {
     await persistProjectData("Task indented");
   });
 
-  row.querySelector(".delete-task-btn").addEventListener("click", async () => {
+  row.querySelector(".inline-delete-task-button").addEventListener("click", async () => {
     deleteTask(index);
     await persistProjectData("Task deleted");
   });
 
-  row.querySelector(".comment-form").addEventListener("submit", async (event) => {
+  row.querySelector(".inline-add-subtask-button").addEventListener("click", async () => {
+    addSubtask(index);
+    await persistProjectData("Sub-task added");
+  });
+}
+
+function renderTaskModal(task) {
+  const milestoneOptions = [
+    `<option value="${SELECT_NONE}">No milestone</option>`,
+    ...state.milestones
+      .sort((a, b) => a.position - b.position)
+      .map(
+        (milestone) =>
+          `<option value="${milestone.id}" ${task.milestone_id === milestone.id ? "selected" : ""}>${escapeHtml(milestone.title)}</option>`
+      )
+  ].join("");
+
+  const memberOptions = [
+    `<option value="${SELECT_NONE}">Unassigned</option>`,
+    ...state.members.map(
+      (member) =>
+        `<option value="${member.user_id}" ${getTaskAssigneeId(task.id) === member.user_id ? "selected" : ""}>${escapeHtml(member.display_name || member.email || "Member")}</option>`
+    )
+  ].join("");
+
+  const dependencyOptions = [
+    `<option value="${SELECT_NONE}">No dependency</option>`,
+    ...state.tasks
+      .filter((candidate) => candidate.id !== task.id)
+      .map(
+        (candidate) =>
+          `<option value="${candidate.id}" ${getTaskDependencyId(task.id) === candidate.id ? "selected" : ""}>${escapeHtml(candidate.title || "Untitled task")}</option>`
+      )
+  ].join("");
+
+  const commentsMarkup = getTaskComments(task.id)
+    .map((comment) => {
+      const author =
+        state.members.find((member) => member.user_id === comment.user_id)?.display_name ||
+        state.members.find((member) => member.user_id === comment.user_id)?.email ||
+        "Member";
+      return `<div class="comment-item"><strong>${escapeHtml(author)}</strong><span>${escapeHtml(comment.body)}</span></div>`;
+    })
+    .join("");
+
+  dom.taskModalBody.innerHTML = `
+    <textarea class="detail-textarea task-description-input" placeholder="Description / notes">${escapeHtml(task.description || "")}</textarea>
+    <div class="task-meta-row">
+      <label class="meta-group">
+        <span>Status</span>
+        <select class="meta-input task-status-input">
+          <option value="not_started" ${task.status === "not_started" ? "selected" : ""}>Not started</option>
+          <option value="in_progress" ${task.status === "in_progress" ? "selected" : ""}>In progress</option>
+          <option value="blocked" ${task.status === "blocked" ? "selected" : ""}>Blocked</option>
+          <option value="done" ${task.status === "done" ? "selected" : ""}>Done</option>
+        </select>
+      </label>
+      <label class="meta-group">
+        <span>Priority</span>
+        <select class="meta-input task-priority-input">
+          <option value="low" ${task.priority === "low" ? "selected" : ""}>Low</option>
+          <option value="medium" ${task.priority === "medium" ? "selected" : ""}>Medium</option>
+          <option value="high" ${task.priority === "high" ? "selected" : ""}>High</option>
+        </select>
+      </label>
+      <label class="meta-group">
+        <span>Due</span>
+        <input class="meta-input task-due-input" type="date" value="${normalizeDateValue(task.due_date)}" />
+      </label>
+      <label class="meta-group">
+        <span>Done</span>
+        <input class="meta-input task-done-input" type="date" value="${normalizeDateValue(task.completed_date)}" />
+      </label>
+    </div>
+    <div class="detail-grid">
+      <label class="meta-group">
+        <span>Milestone</span>
+        <select class="meta-input task-milestone-input">${milestoneOptions}</select>
+      </label>
+      <label class="meta-group">
+        <span>Assignee</span>
+        <select class="meta-input task-assignee-input">${memberOptions}</select>
+      </label>
+      <label class="meta-group">
+        <span>Dependency</span>
+        <select class="meta-input task-dependency-input">${dependencyOptions}</select>
+      </label>
+    </div>
+    <div class="comments-block">
+      <div class="dashboard-title small">Comments</div>
+      <div class="comment-list">${commentsMarkup || '<div class="muted-line">No comments</div>'}</div>
+      <form class="comment-form">
+        <input class="project-input comment-input" type="text" placeholder="Add comment" />
+        <button class="mini-button" type="submit">Comment</button>
+      </form>
+    </div>
+  `;
+
+  wireTaskModal(task);
+}
+
+function openTaskModal(taskId) {
+  const task = getTaskById(taskId);
+  if (!task || !task.title.trim()) return;
+  activeTaskModalId = taskId;
+  renderTaskModal(task);
+  openModal("taskModal");
+}
+
+function refreshTaskModalIfOpen() {
+  if (!activeTaskModalId) return;
+  const task = getTaskById(activeTaskModalId);
+  if (!task) {
+    closeModal();
+    return;
+  }
+  renderTaskModal(task);
+}
+
+function wireTaskModal(task) {
+  dom.taskModalBody.querySelector(".task-description-input").addEventListener("input", async (event) => {
+    task.description = event.target.value;
+    await persistProjectData("Description saved", false);
+  });
+
+  dom.taskModalBody.querySelector(".task-status-input").addEventListener("change", async (event) => {
+    task.status = event.target.value;
+    task.completed_date = task.status === "done" ? task.completed_date || todayISO() : "";
+    task.completed_by = task.status === "done" ? task.completed_by || session?.user?.id || null : null;
+    if (task.status !== "done") {
+      task.completed_date = "";
+      task.completed_by = null;
+    }
+    await persistProjectData("Status saved");
+  });
+
+  dom.taskModalBody.querySelector(".task-priority-input").addEventListener("change", async (event) => {
+    task.priority = event.target.value;
+    await persistProjectData("Priority saved", false);
+  });
+
+  dom.taskModalBody.querySelector(".task-due-input").addEventListener("input", async (event) => {
+    task.due_date = event.target.value;
+    await persistProjectData("Due date saved", false);
+  });
+
+  dom.taskModalBody.querySelector(".task-done-input").addEventListener("input", async (event) => {
+    task.completed_date = event.target.value;
+    task.status = event.target.value ? "done" : "not_started";
+    task.completed_by = event.target.value ? task.completed_by || session?.user?.id || null : null;
+    if (!event.target.value) task.completed_by = null;
+    await persistProjectData("Completion saved");
+  });
+
+  dom.taskModalBody.querySelector(".task-milestone-input").addEventListener("change", async (event) => {
+    task.milestone_id = event.target.value === SELECT_NONE ? null : event.target.value;
+    await persistProjectData("Milestone saved", false);
+  });
+
+  dom.taskModalBody.querySelector(".task-assignee-input").addEventListener("change", async (event) => {
+    setTaskAssignee(task.id, event.target.value === SELECT_NONE ? null : event.target.value);
+    await persistProjectData("Assignee saved", false);
+  });
+
+  dom.taskModalBody.querySelector(".task-dependency-input").addEventListener("change", async (event) => {
+    setTaskDependency(task.id, event.target.value === SELECT_NONE ? null : event.target.value);
+    await persistProjectData("Dependency saved", false);
+  });
+
+  dom.taskModalBody.querySelector(".comment-form").addEventListener("submit", async (event) => {
     event.preventDefault();
-    const input = row.querySelector(".comment-input");
+    const input = dom.taskModalBody.querySelector(".comment-input");
     const body = input.value.trim();
     if (!body) return;
     state.comments.push({
@@ -1075,6 +1135,7 @@ async function persistProjectData(message, rerender = true) {
 
     await broadcastProjectChanged("A teammate updated this project. Refresh to load the latest changes.");
     setSyncStatus(message || "Synced");
+    refreshTaskModalIfOpen();
     if (rerender) renderApp();
   } catch (error) {
     console.error(error);
