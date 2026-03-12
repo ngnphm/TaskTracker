@@ -18,6 +18,7 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: 14px;
 }
 
 button,
@@ -63,7 +64,7 @@ input {
 
 h1 {
   margin: 0;
-  font-size: 28px;
+  font-size: 22px;
   font-weight: 700;
 }
 
@@ -163,12 +164,12 @@ h1 {
 }
 
 .progress-copy strong {
-  font-size: 20px;
+  font-size: 16px;
 }
 
 .progress-copy span {
   color: var(--muted);
-  font-size: 14px;
+  font-size: 12px;
 }
 
 .progress-bar {
@@ -196,10 +197,10 @@ h1 {
 
 .task-main-row {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) auto;
-  gap: 18px;
+  grid-template-columns: 28px minmax(0, 1fr) auto minmax(280px, 340px);
+  gap: 14px;
   align-items: center;
-  padding: 20px 36px;
+  padding: 14px 24px;
 }
 
 .checkbox-wrap {
@@ -209,8 +210,8 @@ h1 {
 }
 
 .task-check {
-  width: 30px;
-  height: 30px;
+  width: 22px;
+  height: 22px;
   margin: 0;
   accent-color: var(--accent);
 }
@@ -220,8 +221,8 @@ h1 {
   border: 0;
   background: transparent;
   color: var(--text);
-  font-size: 20px;
-  line-height: 1.35;
+  font-size: 16px;
+  line-height: 1.25;
   padding: 0;
   min-width: 0;
 }
@@ -249,8 +250,8 @@ h1 {
   background: #fff;
   color: var(--muted);
   cursor: pointer;
-  padding: 7px 12px;
-  font-size: 13px;
+  padding: 5px 10px;
+  font-size: 12px;
 }
 
 .mini-button:hover {
@@ -259,19 +260,16 @@ h1 {
 }
 
 .task-meta-row {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(220px, 280px));
-  gap: 14px;
-  padding: 0 36px 18px 88px;
+  display: contents;
 }
 
 .meta-group {
   display: grid;
-  gap: 6px;
+  gap: 4px;
 }
 
 .meta-group span {
-  font-size: 12px;
+  font-size: 10px;
   color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -282,22 +280,24 @@ h1 {
   border-radius: 10px;
   background: #fff;
   color: var(--text);
-  padding: 10px 12px;
+  padding: 7px 10px;
+  font-size: 12px;
+  width: 100%;
 }
 
 .new-task-row {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr);
-  gap: 18px;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 14px;
   align-items: center;
-  padding: 20px 36px;
+  padding: 14px 24px;
 }
 
 .plus-button {
   border: 0;
   background: transparent;
   color: var(--muted);
-  font-size: 44px;
+  font-size: 34px;
   line-height: 1;
   cursor: pointer;
   padding: 0;
@@ -306,7 +306,7 @@ h1 {
 .new-task-input {
   border: 0;
   background: transparent;
-  font-size: 20px;
+  font-size: 16px;
   color: var(--text);
   padding: 0;
 }
@@ -316,9 +316,9 @@ h1 {
 }
 
 .empty-state {
-  padding: 20px 36px;
+  padding: 16px 24px;
   color: var(--muted);
-  font-size: 18px;
+  font-size: 14px;
 }
 
 @media (max-width: 900px) {
@@ -331,7 +331,7 @@ h1 {
   }
 
   .task-main-row {
-    grid-template-columns: 34px minmax(0, 1fr);
+    grid-template-columns: 28px minmax(0, 1fr);
   }
 
   .task-actions {
@@ -340,9 +340,14 @@ h1 {
     flex-wrap: wrap;
   }
 
+  .task-row {
+    border-bottom: 1px solid var(--line);
+  }
+
   .task-meta-row {
-    grid-template-columns: 1fr;
-    padding-left: 72px;
-    padding-right: 20px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    padding: 0 20px 14px 62px;
   }
 }

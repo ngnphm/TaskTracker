@@ -130,9 +130,8 @@ function renderTasks() {
           <button class="mini-button add-subtask-btn" type="button">Sub-task</button>
           <button class="mini-button delete-task-btn" type="button">Delete</button>
         </div>
-      </div>
-      <div class="task-meta-row" style="padding-left:${leftPadding + 52}px">
-        <label class="meta-group">
+        <div class="task-meta-row">
+          <label class="meta-group">
           <span>Due date</span>
           <input class="meta-input task-due-input" type="date" value="${task.dueDate || ""}" />
         </label>
@@ -140,6 +139,7 @@ function renderTasks() {
           <span>Completed date</span>
           <input class="meta-input task-completed-input" type="date" value="${task.completedDate || ""}" />
         </label>
+        </div>
       </div>
     `;
 
