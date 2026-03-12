@@ -204,6 +204,32 @@ h1 {
     color 180ms ease;
 }
 
+.member-tag-button {
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+
+.member-tag-button:hover {
+  color: var(--danger);
+  background: #fdeceb;
+  border-color: #f0c2be;
+}
+
+.list-item-button {
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  text-align: left;
+  padding: 2px 4px;
+  cursor: pointer;
+}
+
+.list-item-button:hover {
+  color: var(--danger);
+  background: #fdeceb;
+  border-color: #f0c2be;
+}
+
 .sync-chip[data-error="true"] {
   background: #fdeceb;
   color: var(--danger);
@@ -482,6 +508,18 @@ h1 {
     transform 180ms var(--ease-quick),
     background-color 180ms ease,
     color 180ms ease;
+}
+
+.completion-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #e9f8ee;
+  color: #1f8a49;
+  font-size: 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .task-title-input.is-main-task {

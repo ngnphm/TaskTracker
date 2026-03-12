@@ -117,6 +117,7 @@ function createTask(title = "", level = 0) {
     priority: "medium",
     due_date: "",
     completed_date: "",
+    completed_by: null,
     position: state.tasks.length,
     level,
     archived: false,
@@ -160,6 +161,10 @@ function getSelectedProject() {
   return projects.find((project) => project.id === selectedProjectId) || null;
 }
 
+function isCurrentUserProjectOwner() {
+  return Boolean(session?.user?.id) && getSelectedProject()?.owner_id === session.user.id;
+}
+
 function openModal(targetId) {
   dom.modalBackdrop.hidden = false;
   ["projectModal", "milestoneModal", "meetingModal", "collaboratorModal"].forEach((id) => {
@@ -185,6 +190,16 @@ function getTaskAssigneeLabel(taskId) {
   if (!assigneeId) return "";
   const member = state.members.find((entry) => entry.user_id === assigneeId);
   return member?.display_name || member?.email || "";
+}
+
+function getMemberLabel(userId) {
+  if (!userId) return "";
+  const member = state.members.find((entry) => entry.user_id === userId);
+  return member?.display_name || member?.email || "";
+}
+
+function getTaskCompleterLabel(task) {
+  return getMemberLabel(task.completed_by);
 }
 
 function getTaskDependencyId(taskId) {
@@ -222,6 +237,12 @@ function syncParentCompletion() {
           .sort()
           .slice(-1)[0] || todayISO()
       : "";
+    task.completed_by = allDone
+      ? children
+          .filter((child) => child.completed_date)
+          .sort((a, b) => String(a.completed_date).localeCompare(String(b.completed_date)))
+          .slice(-1)[0]?.completed_by || task.completed_by || null
+      : null;
   }
 }
 
@@ -259,6 +280,9 @@ function renderProjects() {
     if (project.id === selectedProjectId) option.selected = true;
     dom.projectSelect.appendChild(option);
   });
+
+  const isOwner = isCurrentUserProjectOwner();
+  dom.openMilestoneModalBtn.hidden = !isOwner;
 }
 
 function renderMembers() {
@@ -268,10 +292,23 @@ function renderMembers() {
     return;
   }
 
+  const canRemoveCollaborators = isCurrentUserProjectOwner();
   state.members.forEach((member) => {
-    const tag = document.createElement("span");
-    tag.className = "member-tag";
+    const isRemovable = canRemoveCollaborators && member.role !== "owner" && member.user_id !== session?.user?.id;
+    const tag = document.createElement(isRemovable ? "button" : "span");
+    tag.className = `member-tag ${isRemovable ? "member-tag-button" : ""}`;
     tag.textContent = `${member.display_name || member.email || "Member"} · ${member.role}`;
+    if (isRemovable) {
+      tag.type = "button";
+      tag.dataset.userId = member.user_id;
+      tag.dataset.memberLabel = member.display_name || member.email || "Member";
+      tag.title = "Click to remove collaborator";
+      tag.addEventListener("click", async () => {
+        const confirmed = window.confirm(`Remove ${tag.dataset.memberLabel} from this project?`);
+        if (!confirmed) return;
+        await removeCollaborator(member.user_id, tag.dataset.memberLabel);
+      });
+    }
     dom.memberList.appendChild(tag);
   });
 }
@@ -296,12 +333,23 @@ function renderMilestones() {
     dom.milestoneList.innerHTML = '<div class="muted-line">No milestones</div>';
     return;
   }
+  const canRemoveMilestones = isCurrentUserProjectOwner();
   state.milestones
     .sort((a, b) => a.position - b.position)
     .forEach((milestone) => {
-      const item = document.createElement("div");
-      item.className = "list-item";
-      item.textContent = `${milestone.title}${milestone.due_date ? ` · ${milestone.due_date}` : ""}`;
+      const label = `${milestone.title}${milestone.due_date ? ` · ${milestone.due_date}` : ""}`;
+      const item = document.createElement(canRemoveMilestones ? "button" : "div");
+      item.className = `list-item ${canRemoveMilestones ? "list-item-button" : ""}`;
+      item.textContent = label;
+      if (canRemoveMilestones) {
+        item.type = "button";
+        item.title = "Click to remove milestone";
+        item.addEventListener("click", async () => {
+          const confirmed = window.confirm(`Remove milestone "${milestone.title}"?`);
+          if (!confirmed) return;
+          await removeMilestone(milestone.id, milestone.title);
+        });
+      }
       dom.milestoneList.appendChild(item);
     });
 }
@@ -420,6 +468,7 @@ function renderTaskRow(task, index) {
         <div class="task-title-wrap">
           <textarea class="task-title-input ${task.status === "done" ? "is-complete" : ""} ${task.level === 0 ? "is-main-task" : ""}" placeholder="Checklist item">${escapeHtml(task.title)}</textarea>
           ${getTaskAssigneeLabel(task.id) ? `<span class="assignee-badge">${escapeHtml(getTaskAssigneeLabel(task.id))}</span>` : ""}
+          ${task.status === "done" && getTaskCompleterLabel(task) ? `<span class="completion-badge">✓ ${escapeHtml(getTaskCompleterLabel(task))}</span>` : ""}
         </div>
       </div>
       <div class="task-side">
@@ -577,12 +626,14 @@ function wireTaskRow(row, task, index) {
   row.querySelector(".task-check").addEventListener("change", async (event) => {
     task.status = event.target.checked ? "done" : "not_started";
     task.completed_date = event.target.checked ? task.completed_date || todayISO() : "";
+    task.completed_by = event.target.checked ? session?.user?.id || null : null;
     await persistProjectData("Task updated");
   });
 
   row.querySelector(".task-status-input").addEventListener("change", async (event) => {
     task.status = event.target.value;
     task.completed_date = task.status === "done" ? task.completed_date || todayISO() : "";
+    task.completed_by = task.status === "done" ? task.completed_by || session?.user?.id || null : null;
     if (task.status !== "done") task.completed_date = "";
     await persistProjectData("Status saved");
   });
@@ -600,6 +651,7 @@ function wireTaskRow(row, task, index) {
   row.querySelector(".task-done-input").addEventListener("input", async (event) => {
     task.completed_date = event.target.value;
     task.status = event.target.value ? "done" : "not_started";
+    task.completed_by = event.target.value ? task.completed_by || session?.user?.id || null : null;
     await persistProjectData("Completion saved");
   });
 
@@ -753,6 +805,7 @@ function taskRowsForDb() {
     ...task,
     due_date: nullableDateValue(task.due_date),
     completed_date: nullableDateValue(task.completed_date),
+    completed_by: task.completed_by || null,
     project_id: selectedProjectId,
     position: index,
     parent_task_id: null
@@ -811,7 +864,7 @@ async function loadProjectData() {
   ] = await Promise.all([
     supabaseClient
       .from("tasks")
-      .select("id, project_id, milestone_id, parent_task_id, created_by, title, description, status, priority, due_date, completed_date, position, level, archived, collapsed")
+      .select("id, project_id, milestone_id, parent_task_id, created_by, title, description, status, priority, due_date, completed_date, completed_by, position, level, archived, collapsed")
       .eq("project_id", selectedProjectId)
       .order("position", { ascending: true }),
     supabaseClient
@@ -880,7 +933,8 @@ async function loadProjectData() {
   state.tasks = (tasksResult.data || []).map((task) => ({
     ...task,
     due_date: normalizeDateValue(task.due_date),
-    completed_date: normalizeDateValue(task.completed_date)
+    completed_date: normalizeDateValue(task.completed_date),
+    completed_by: task.completed_by || null
   }));
   state.milestones = (milestonesResult.data || []).map((milestone) => ({
     ...milestone,
@@ -913,6 +967,7 @@ async function persistProjectData(message, rerender = true) {
   const projectTaskIds = state.tasks.map((task) => task.id);
   const projectMilestoneIds = state.milestones.map((milestone) => milestone.id);
   const projectMeetingIds = state.meetings.map((meeting) => meeting.id);
+  const isOwner = isCurrentUserProjectOwner();
 
   try {
     if (projectTaskIds.length) {
@@ -923,9 +978,11 @@ async function persistProjectData(message, rerender = true) {
 
     await supabaseClient.from("tasks").delete().eq("project_id", selectedProjectId);
     await supabaseClient.from("project_meetings").delete().eq("project_id", selectedProjectId);
-    await supabaseClient.from("milestones").delete().eq("project_id", selectedProjectId);
+    if (isOwner) {
+      await supabaseClient.from("milestones").delete().eq("project_id", selectedProjectId);
+    }
 
-    if (projectMilestoneIds.length) {
+    if (isOwner && projectMilestoneIds.length) {
       const { error } = await supabaseClient.from("milestones").insert(
         state.milestones.map((milestone, index) => ({
           ...milestone,
@@ -993,7 +1050,7 @@ async function createProject(name) {
 
 async function addMilestone() {
   const title = dom.milestoneTitleInput.value.trim();
-  if (!title || !selectedProjectId) return;
+  if (!title || !selectedProjectId || !isCurrentUserProjectOwner()) return;
   state.milestones.push({
     id: crypto.randomUUID(),
     project_id: selectedProjectId,
@@ -1005,6 +1062,15 @@ async function addMilestone() {
   dom.milestoneDueInput.value = "";
   closeModal();
   await persistProjectData("Milestone added");
+}
+
+async function removeMilestone(milestoneId, title) {
+  if (!isCurrentUserProjectOwner()) return;
+  state.milestones = state.milestones.filter((milestone) => milestone.id !== milestoneId);
+  state.tasks = state.tasks.map((task) =>
+    task.milestone_id === milestoneId ? { ...task, milestone_id: null } : task
+  );
+  await persistProjectData(`Milestone "${title}" removed`);
 }
 
 async function addMeeting() {
@@ -1059,6 +1125,25 @@ async function inviteCollaborator() {
   closeModal();
   await loadProjectData();
   setSyncStatus("Collaborator update saved");
+}
+
+async function removeCollaborator(userId, label) {
+  if (!supabaseClient || !selectedProjectId || !isCurrentUserProjectOwner()) return;
+  const { error } = await supabaseClient
+    .from("project_members")
+    .delete()
+    .eq("project_id", selectedProjectId)
+    .eq("user_id", userId);
+
+  if (error) {
+    console.error(error);
+    setSyncStatus(`Could not remove collaborator: ${error.message}`, true);
+    return;
+  }
+
+  state.assignees = state.assignees.filter((entry) => entry.user_id !== userId);
+  await persistProjectData(`${label} removed`);
+  await loadProjectData();
 }
 
 async function handleAuthSubmit(event) {

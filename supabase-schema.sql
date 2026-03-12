@@ -57,6 +57,7 @@ create table public.tasks (
   priority text not null default 'medium' check (priority in ('low', 'medium', 'high')),
   due_date date,
   completed_date date,
+  completed_by uuid references auth.users(id) on delete set null,
   position integer not null default 0,
   level integer not null default 0,
   archived boolean not null default false,
@@ -331,20 +332,20 @@ on public.milestones
 for select
 using (public.is_project_member(project_id) or public.is_project_owner(project_id));
 
-create policy "milestones_insert_editors"
+create policy "milestones_insert_owner"
 on public.milestones
 for insert
-with check (public.is_project_editor(project_id) or public.is_project_owner(project_id));
+with check (public.is_project_owner(project_id));
 
-create policy "milestones_update_editors"
+create policy "milestones_update_owner"
 on public.milestones
 for update
-using (public.is_project_editor(project_id) or public.is_project_owner(project_id));
+using (public.is_project_owner(project_id));
 
-create policy "milestones_delete_editors"
+create policy "milestones_delete_owner"
 on public.milestones
 for delete
-using (public.is_project_editor(project_id) or public.is_project_owner(project_id));
+using (public.is_project_owner(project_id));
 
 create policy "tasks_select_members"
 on public.tasks
