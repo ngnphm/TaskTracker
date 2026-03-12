@@ -237,9 +237,19 @@ h1 {
 
 .project-panel,
 .progress-panel,
-.archive-panel {
+.archive-panel,
+.refresh-banner {
   padding: 10px 24px;
   border-bottom: 1px solid var(--line);
+}
+
+.refresh-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: #eef4ff;
+  color: #3657a6;
 }
 
 .project-controls,

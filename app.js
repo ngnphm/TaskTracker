@@ -25,6 +25,9 @@ const dom = {
   exportBtn: document.querySelector("#exportBtn"),
   resetDataBtn: document.querySelector("#resetDataBtn"),
   projectSelect: document.querySelector("#projectSelect"),
+  refreshBanner: document.querySelector("#refreshBanner"),
+  refreshBannerText: document.querySelector("#refreshBannerText"),
+  refreshBannerBtn: document.querySelector("#refreshBannerBtn"),
   openProjectModalBtn: document.querySelector("#openProjectModalBtn"),
   openMilestoneModalBtn: document.querySelector("#openMilestoneModalBtn"),
   openMeetingModalBtn: document.querySelector("#openMeetingModalBtn"),
@@ -77,6 +80,8 @@ let projects = [];
 let state = loadLocalState();
 let selectedProjectId = localStorage.getItem("capstone-selected-project-id") || "";
 const expandedDetailTaskIds = new Set();
+let projectChannel = null;
+const realtimeClientId = crypto.randomUUID();
 
 function loadLocalState() {
   const saved = localStorage.getItem(STORAGE_KEY);
@@ -102,6 +107,7 @@ function saveSelectedProject(projectId) {
 function resetProjectState() {
   state = structuredClone(defaultState);
   expandedDetailTaskIds.clear();
+  hideRefreshBanner();
 }
 
 function createTask(title = "", level = 0) {
@@ -151,6 +157,15 @@ function setSyncStatus(message, isError = false) {
 function setAuthStatus(message, isError = false) {
   dom.authStatus.textContent = message;
   dom.authStatus.dataset.error = isError ? "true" : "false";
+}
+
+function showRefreshBanner(message = "This project changed. Refresh to load the latest updates.") {
+  dom.refreshBannerText.textContent = message;
+  dom.refreshBanner.hidden = false;
+}
+
+function hideRefreshBanner() {
+  dom.refreshBanner.hidden = true;
 }
 
 function getProjectName() {
@@ -834,7 +849,45 @@ async function loadProjects() {
   if (!projects.some((project) => project.id === selectedProjectId)) {
     saveSelectedProject(projects[0].id);
   }
+  setupProjectRealtimeSubscription();
   await loadProjectData();
+}
+
+function teardownProjectRealtimeSubscription() {
+  if (!supabaseClient || !projectChannel) return;
+  supabaseClient.removeChannel(projectChannel);
+  projectChannel = null;
+}
+
+function setupProjectRealtimeSubscription() {
+  if (!supabaseClient || !session || !selectedProjectId) {
+    teardownProjectRealtimeSubscription();
+    return;
+  }
+
+  const nextChannelName = `project-updates:${selectedProjectId}`;
+  if (projectChannel?.topic === nextChannelName) return;
+
+  teardownProjectRealtimeSubscription();
+  projectChannel = supabaseClient
+    .channel(nextChannelName)
+    .on("broadcast", { event: "project-updated" }, ({ payload }) => {
+      if (!payload || payload.senderId === realtimeClientId) return;
+      showRefreshBanner(payload.message || "This project changed. Refresh to load the latest updates.");
+    })
+    .subscribe();
+}
+
+async function broadcastProjectChanged(message) {
+  if (!projectChannel) return;
+  await projectChannel.send({
+    type: "broadcast",
+    event: "project-updated",
+    payload: {
+      senderId: realtimeClientId,
+      message: message || "This project changed. Refresh to load the latest updates."
+    }
+  });
 }
 
 async function acceptPendingInvitations() {
@@ -854,6 +907,7 @@ async function loadProjectData() {
   }
 
   setSyncStatus("Loading project...");
+  hideRefreshBanner();
 
   const [
     tasksResult,
@@ -1019,6 +1073,7 @@ async function persistProjectData(message, rerender = true) {
       if (error) throw error;
     }
 
+    await broadcastProjectChanged("A teammate updated this project. Refresh to load the latest changes.");
     setSyncStatus(message || "Synced");
     if (rerender) renderApp();
   } catch (error) {
@@ -1124,6 +1179,7 @@ async function inviteCollaborator() {
   dom.inviteEmailInput.value = "";
   closeModal();
   await loadProjectData();
+  await broadcastProjectChanged("A teammate updated collaborators on this project. Refresh to reload members.");
   setSyncStatus("Collaborator update saved");
 }
 
@@ -1185,6 +1241,7 @@ async function handleAuthSubmit(event) {
 
 async function handleSignOut() {
   if (!supabaseClient) return;
+  teardownProjectRealtimeSubscription();
   await supabaseClient.auth.signOut();
   session = null;
   projects = [];
@@ -1212,6 +1269,7 @@ async function initializeAuth() {
     if (session) {
       await loadProjects();
     } else {
+      teardownProjectRealtimeSubscription();
       projects = [];
       saveSelectedProject("");
       resetProjectState();
@@ -1236,6 +1294,10 @@ dom.projectForm.addEventListener("submit", async (event) => {
 });
 dom.projectSelect.addEventListener("change", async (event) => {
   saveSelectedProject(event.target.value);
+  setupProjectRealtimeSubscription();
+  await loadProjectData();
+});
+dom.refreshBannerBtn.addEventListener("click", async () => {
   await loadProjectData();
 });
 dom.openProjectModalBtn.addEventListener("click", () => openModal("projectModal"));
