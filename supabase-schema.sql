@@ -166,6 +166,8 @@ create or replace function public.is_project_member(p_project_id uuid)
 returns boolean
 language sql
 stable
+security definer
+set search_path = public
 as $$
   select exists (
     select 1
@@ -179,6 +181,8 @@ create or replace function public.is_project_editor(p_project_id uuid)
 returns boolean
 language sql
 stable
+security definer
+set search_path = public
 as $$
   select exists (
     select 1
@@ -193,6 +197,8 @@ create or replace function public.is_project_owner(p_project_id uuid)
 returns boolean
 language sql
 stable
+security definer
+set search_path = public
 as $$
   select exists (
     select 1

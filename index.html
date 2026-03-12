@@ -59,33 +59,12 @@
               <span>Project</span>
               <select id="projectSelect" class="project-select"></select>
             </label>
-            <form id="projectForm" class="project-form">
-              <input id="projectNameInput" class="project-input" type="text" placeholder="New project name" />
-              <button class="mini-button" type="submit">Add project</button>
-            </form>
-          </div>
-          <div class="project-actions-row">
-            <form id="milestoneForm" class="inline-form">
-              <input id="milestoneTitleInput" class="project-input" type="text" placeholder="New milestone" />
-              <input id="milestoneDueInput" class="project-input" type="date" />
-              <button class="mini-button" type="submit">Add milestone</button>
-            </form>
-            <form id="meetingForm" class="inline-form">
-              <input id="meetingTitleInput" class="project-input" type="text" placeholder="Meeting title" />
-              <input id="meetingDateInput" class="project-input" type="datetime-local" />
-              <button class="mini-button" type="submit">Add meeting</button>
-            </form>
-          </div>
-          <div class="project-actions-row">
-            <form id="inviteForm" class="inline-form">
-              <input id="inviteEmailInput" class="project-input" type="email" placeholder="Collaborator email" />
-              <select id="inviteRoleInput" class="project-select">
-                <option value="editor">Editor</option>
-                <option value="viewer">Viewer</option>
-                <option value="member">Member</option>
-              </select>
-              <button class="mini-button" type="submit">Invite / Add</button>
-            </form>
+            <div class="action-buttons">
+              <button id="openProjectModalBtn" class="mini-button" type="button">New Project</button>
+              <button id="openMilestoneModalBtn" class="mini-button" type="button">New Milestone</button>
+              <button id="openMeetingModalBtn" class="mini-button" type="button">Add Meeting</button>
+              <button id="openCollaboratorModalBtn" class="mini-button" type="button">Add Collaborator</button>
+            </div>
           </div>
         </section>
 
@@ -100,6 +79,10 @@
         </section>
 
         <section class="dashboard-grid">
+          <div class="dashboard-card">
+            <div class="dashboard-title">Project Due</div>
+            <div id="projectDueSummary" class="list-stack"></div>
+          </div>
           <div class="dashboard-card">
             <div class="dashboard-title">Members</div>
             <div id="memberList" class="tag-list"></div>
@@ -141,6 +124,62 @@
         </section>
       </section>
     </main>
+
+    <div id="modalBackdrop" class="modal-backdrop" hidden>
+      <section id="projectModal" class="modal-card" hidden>
+        <div class="modal-header">
+          <h2>New Project</h2>
+          <button class="text-button close-modal-btn" type="button" data-target="projectModal">Close</button>
+        </div>
+        <form id="projectForm" class="modal-form">
+          <input id="projectNameInput" class="project-input" type="text" placeholder="Project name" />
+          <label class="field-label" for="projectDueInput">Project due date</label>
+          <input id="projectDueInput" class="project-input" type="date" />
+          <button class="mini-button" type="submit">Create project</button>
+        </form>
+      </section>
+
+      <section id="milestoneModal" class="modal-card" hidden>
+        <div class="modal-header">
+          <h2>New Milestone</h2>
+          <button class="text-button close-modal-btn" type="button" data-target="milestoneModal">Close</button>
+        </div>
+        <form id="milestoneForm" class="modal-form">
+          <input id="milestoneTitleInput" class="project-input" type="text" placeholder="Milestone title" />
+          <label class="field-label" for="milestoneDueInput">Milestone due date</label>
+          <input id="milestoneDueInput" class="project-input" type="date" />
+          <button class="mini-button" type="submit">Add milestone</button>
+        </form>
+      </section>
+
+      <section id="meetingModal" class="modal-card" hidden>
+        <div class="modal-header">
+          <h2>Add Meeting</h2>
+          <button class="text-button close-modal-btn" type="button" data-target="meetingModal">Close</button>
+        </div>
+        <form id="meetingForm" class="modal-form">
+          <input id="meetingTitleInput" class="project-input" type="text" placeholder="Meeting title" />
+          <input id="meetingDateInput" class="project-input" type="datetime-local" />
+          <button class="mini-button" type="submit">Add meeting</button>
+        </form>
+      </section>
+
+      <section id="collaboratorModal" class="modal-card" hidden>
+        <div class="modal-header">
+          <h2>Add Collaborator</h2>
+          <button class="text-button close-modal-btn" type="button" data-target="collaboratorModal">Close</button>
+        </div>
+        <form id="inviteForm" class="modal-form">
+          <input id="inviteEmailInput" class="project-input" type="email" placeholder="Collaborator email" />
+          <select id="inviteRoleInput" class="project-select">
+            <option value="editor">Editor</option>
+            <option value="viewer">Viewer</option>
+            <option value="member">Member</option>
+          </select>
+          <button class="mini-button" type="submit">Add collaborator</button>
+        </form>
+      </section>
+    </div>
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="./config.js"></script>
