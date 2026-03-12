@@ -1,6 +1,6 @@
 # Group Assignment Tracker
 
-A simple checklist-style task tracker for group assignments. It runs as a static site, works with GitHub Pages, and can sync tasks across devices with Supabase.
+A collaborative assignment tracker for group projects. It runs as a static site, works with GitHub Pages, and syncs projects, milestones, meetings, comments, and tasks across devices with Supabase.
 
 ## Files
 
@@ -21,7 +21,7 @@ python3 -m http.server 8000
 
 Then visit `http://localhost:8000`.
 
-## Supabase setup for cross-device sync
+## Supabase setup for collaboration
 
 1. Create a Supabase project.
 2. In Supabase, open `SQL Editor`.
@@ -56,6 +56,7 @@ https://YOUR_GITHUB_USERNAME.github.io/REPOSITORY_NAME/
 ## Notes
 
 - The tracker keeps a local browser copy for resilience, but the main source of truth is Supabase after sign-in.
-- Use the same email and password on another device to load the same tasks.
+- You can create multiple projects, invite collaborators, assign tasks, group work by milestones, and add meetings and comments.
+- Use the same email and password on another device to load the same projects and tasks.
 - Use the Export button to save a JSON backup of your tasks.
 # TaskTracker

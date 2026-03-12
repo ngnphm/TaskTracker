@@ -38,11 +38,11 @@
         </div>
       </section>
 
-      <section id="appCard" class="checklist-card" hidden>
+      <section id="appCard" class="checklist-card app-card" hidden>
         <header class="checklist-header">
           <div>
             <p class="eyebrow">Assignment Tracker</p>
-            <h1 id="pageTitle">Group Assignment</h1>
+            <h1 id="pageTitle">Projects</h1>
           </div>
           <div class="header-actions">
             <span id="userEmail" class="user-chip"></span>
@@ -53,6 +53,42 @@
           </div>
         </header>
 
+        <section class="project-panel">
+          <div class="project-controls">
+            <label class="project-picker">
+              <span>Project</span>
+              <select id="projectSelect" class="project-select"></select>
+            </label>
+            <form id="projectForm" class="project-form">
+              <input id="projectNameInput" class="project-input" type="text" placeholder="New project name" />
+              <button class="mini-button" type="submit">Add project</button>
+            </form>
+          </div>
+          <div class="project-actions-row">
+            <form id="milestoneForm" class="inline-form">
+              <input id="milestoneTitleInput" class="project-input" type="text" placeholder="New milestone" />
+              <input id="milestoneDueInput" class="project-input" type="date" />
+              <button class="mini-button" type="submit">Add milestone</button>
+            </form>
+            <form id="meetingForm" class="inline-form">
+              <input id="meetingTitleInput" class="project-input" type="text" placeholder="Meeting title" />
+              <input id="meetingDateInput" class="project-input" type="datetime-local" />
+              <button class="mini-button" type="submit">Add meeting</button>
+            </form>
+          </div>
+          <div class="project-actions-row">
+            <form id="inviteForm" class="inline-form">
+              <input id="inviteEmailInput" class="project-input" type="email" placeholder="Collaborator email" />
+              <select id="inviteRoleInput" class="project-select">
+                <option value="editor">Editor</option>
+                <option value="viewer">Viewer</option>
+                <option value="member">Member</option>
+              </select>
+              <button class="mini-button" type="submit">Invite / Add</button>
+            </form>
+          </div>
+        </section>
+
         <section class="progress-panel">
           <div class="progress-copy">
             <strong id="progressPercent">0%</strong>
@@ -60,6 +96,29 @@
           </div>
           <div class="progress-bar">
             <div id="progressFill" class="progress-fill"></div>
+          </div>
+        </section>
+
+        <section class="dashboard-grid">
+          <div class="dashboard-card">
+            <div class="dashboard-title">Members</div>
+            <div id="memberList" class="tag-list"></div>
+          </div>
+          <div class="dashboard-card">
+            <div class="dashboard-title">Milestones</div>
+            <div id="milestoneList" class="list-stack"></div>
+          </div>
+          <div class="dashboard-card">
+            <div class="dashboard-title">Due Soon</div>
+            <div id="dueSoonList" class="list-stack"></div>
+          </div>
+          <div class="dashboard-card">
+            <div class="dashboard-title">Meetings</div>
+            <div id="meetingList" class="list-stack"></div>
+          </div>
+          <div class="dashboard-card">
+            <div class="dashboard-title">Invitations</div>
+            <div id="invitationList" class="list-stack"></div>
           </div>
         </section>
 
@@ -75,6 +134,11 @@
             autocomplete="off"
           />
         </form>
+
+        <section class="archive-panel">
+          <div class="dashboard-title">Archived tasks</div>
+          <div id="archivedTaskList" class="list-stack"></div>
+        </section>
       </section>
     </main>
 
