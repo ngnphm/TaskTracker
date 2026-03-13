@@ -77,7 +77,14 @@ const dom = {
   authStatus: document.querySelector("#authStatus"),
   syncStatus: document.querySelector("#syncStatus"),
   userEmail: document.querySelector("#userEmail"),
-  signOutBtn: document.querySelector("#signOutBtn")
+  signOutBtn: document.querySelector("#signOutBtn"),
+  openLinksBtn: document.querySelector("#openLinksBtn"),
+  closeLinksPanelBtn: document.querySelector("#closeLinksPanelBtn"),
+  linksPanel: document.querySelector("#linksPanel"),
+  linkChips: document.querySelector("#linkChips"),
+  addLinkForm: document.querySelector("#addLinkForm"),
+  linkLabelInput: document.querySelector("#linkLabelInput"),
+  linkUrlInput: document.querySelector("#linkUrlInput")
 };
 
 const localSupabaseConfig = window.SUPABASE_CONFIG || {};
@@ -91,6 +98,7 @@ const supabaseClient =
 let session = null;
 let authMode = "signin";
 let projects = [];
+let projectLinks = [];
 let state = loadLocalState();
 let selectedProjectId = localStorage.getItem("capstone-selected-project-id") || "";
 let projectModalMode = "create";
@@ -124,8 +132,10 @@ function saveSelectedProject(projectId) {
 
 function resetProjectState() {
   state = structuredClone(defaultState);
+  projectLinks = [];
   expandedDetailTaskIds.clear();
   hideRefreshBanner();
+  if (dom.linksPanel) dom.linksPanel.hidden = true;
 }
 
 function createTask(title = "", level = 0) {
@@ -650,6 +660,7 @@ function renderApp() {
   renderDueSoon();
   renderStats();
   renderTasks();
+  renderLinksPanel();
   saveLocalState();
 }
 
@@ -1092,7 +1103,8 @@ async function loadProjectData() {
     milestonesResult,
     meetingsResult,
     invitesResult,
-    membersResult
+    membersResult,
+    linksResult
   ] = await Promise.all([
     supabaseClient
       .from("tasks")
@@ -1117,7 +1129,12 @@ async function loadProjectData() {
     supabaseClient
       .from("project_members")
       .select("project_id, user_id, role")
+      .eq("project_id", selectedProjectId),
+    supabaseClient
+      .from("project_links")
+      .select("id, project_id, label, url, created_by")
       .eq("project_id", selectedProjectId)
+      .order("created_at", { ascending: true })
   ]);
 
   const hasError = [tasksResult, milestonesResult, meetingsResult, invitesResult, membersResult].find(
@@ -1182,6 +1199,7 @@ async function loadProjectData() {
     email: profilesById.get(member.user_id)?.email || "",
     display_name: profilesById.get(member.user_id)?.display_name || ""
   }));
+  projectLinks = linksResult.data || [];
 
   setSyncStatus("Synced");
   renderApp();
@@ -1566,6 +1584,83 @@ async function initializeAuth() {
     }
   });
 }
+
+// ── Useful Links ────────────────────────────────────────────────────────────
+
+function renderLinksPanel() {
+  const container = dom.linkChips;
+  if (!container) return;
+  container.innerHTML = "";
+  projectLinks.forEach((link) => {
+    const chip = document.createElement("div");
+    chip.className = "link-chip";
+    chip.innerHTML = `
+      <a class="link-chip-anchor" href="${link.url}" target="_blank" rel="noopener noreferrer">
+        <svg class="link-chip-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8">
+          <path d="M6.5 9.5a3.536 3.536 0 0 0 5 0l2-2a3.536 3.536 0 0 0-5-5l-1 1"/>
+          <path d="M9.5 6.5a3.536 3.536 0 0 0-5 0l-2 2a3.536 3.536 0 0 0 5 5l1-1"/>
+        </svg>
+        <span class="link-chip-label">${link.label}</span>
+      </a>
+      <button class="link-chip-delete" data-id="${link.id}" aria-label="Remove link">×</button>
+    `;
+    chip.querySelector(".link-chip-delete").addEventListener("click", () => deleteProjectLink(link.id));
+    container.appendChild(chip);
+  });
+}
+
+async function addProjectLink(label, url) {
+  if (!supabaseClient || !session || !selectedProjectId) return;
+  const { data, error } = await supabaseClient
+    .from("project_links")
+    .insert([{ project_id: selectedProjectId, label: label.trim(), url: url.trim(), created_by: session.user.id }])
+    .select("id, project_id, label, url, created_by")
+    .single();
+  if (error) {
+    console.error("Could not add link:", error);
+    return;
+  }
+  projectLinks.push(data);
+  renderLinksPanel();
+}
+
+async function deleteProjectLink(id) {
+  if (!supabaseClient || !session) return;
+  const { error } = await supabaseClient.from("project_links").delete().eq("id", id);
+  if (error) {
+    console.error("Could not delete link:", error);
+    return;
+  }
+  projectLinks = projectLinks.filter((l) => l.id !== id);
+  renderLinksPanel();
+}
+
+dom.openLinksBtn.addEventListener("click", () => {
+  dom.linksPanel.hidden = !dom.linksPanel.hidden;
+  if (!dom.linksPanel.hidden) dom.linkLabelInput.focus();
+});
+
+dom.closeLinksPanelBtn.addEventListener("click", () => {
+  dom.linksPanel.hidden = true;
+  dom.linkLabelInput.value = "";
+  dom.linkUrlInput.value = "";
+});
+
+dom.addLinkForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const label = dom.linkLabelInput.value.trim();
+  const url = dom.linkUrlInput.value.trim();
+  if (!label || !url) return;
+  const btn = dom.addLinkForm.querySelector("button[type=submit]");
+  btn.disabled = true;
+  await addProjectLink(label, url);
+  btn.disabled = false;
+  dom.linkLabelInput.value = "";
+  dom.linkUrlInput.value = "";
+  dom.linksPanel.hidden = true;
+});
+
+// ── End Useful Links ─────────────────────────────────────────────────────────
 
 dom.newTaskForm.addEventListener("submit", async (event) => {
   event.preventDefault();

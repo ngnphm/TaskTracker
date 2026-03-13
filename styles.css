@@ -1057,3 +1057,152 @@ h1 {
   .task-row-actions { opacity: 1; }
   .indent-button { opacity: 1; }
 }
+
+/* ── Useful Links (inline chips) ─────────────────────────────────────────── */
+
+/* Project top row: picker + chips on the same line */
+.project-top-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-bottom: 8px;
+}
+
+/* Chips area sits right of the project select */
+.project-links-inline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.link-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* Individual link chip */
+.link-chip {
+  display: inline-flex;
+  align-items: center;
+  background: #EEF2FF;
+  border: 1px solid #C7D2FE;
+  border-radius: 20px;
+  overflow: hidden;
+  transition: border-color 120ms, box-shadow 120ms;
+}
+
+.link-chip:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px #c7d2fe55;
+}
+
+.link-chip-anchor {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px 3px 8px;
+  text-decoration: none;
+  color: var(--accent);
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.link-chip-anchor:hover .link-chip-label {
+  text-decoration: underline;
+}
+
+.link-chip-icon {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
+
+.link-chip-label {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.link-chip-delete {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 100%;
+  min-height: 24px;
+  border: none;
+  background: transparent;
+  color: #818cf8;
+  font-size: 14px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms, color 120ms, background 120ms;
+  padding: 0 4px 0 0;
+}
+
+.link-chip:hover .link-chip-delete {
+  opacity: 1;
+}
+
+.link-chip-delete:hover {
+  color: #dc2626;
+}
+
+/* "+ Add link" button */
+.add-link-btn {
+  flex-shrink: 0;
+  padding: 3px 10px;
+  height: 26px;
+  border-radius: 20px;
+  border: 1px dashed #A5B4FC;
+  background: transparent;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 120ms, border-color 120ms;
+}
+
+.add-link-btn:hover {
+  background: #EEF2FF;
+  border-color: var(--accent);
+}
+
+/* Add-link form panel */
+.links-add-panel {
+  margin-top: 6px;
+  padding: 10px 12px;
+  background: #F5F3FF;
+  border: 1px solid #C7D2FE;
+  border-radius: 10px;
+}
+
+.links-add-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.links-label-input {
+  flex: 0 0 170px;
+}
+
+.links-url-input {
+  flex: 1;
+  min-width: 140px;
+}
+
+.links-add-form .project-input {
+  height: 32px;
+  padding: 0 10px;
+  font-size: 13px;
+}

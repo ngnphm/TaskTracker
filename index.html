@@ -57,11 +57,30 @@
         </header>
 
         <section class="project-panel">
-          <div class="project-controls">
+          <!-- Row 1: project picker + inline link chips -->
+          <div class="project-top-row">
             <label class="project-picker">
               <span>Project</span>
               <select id="projectSelect" class="project-select"></select>
             </label>
+            <div class="project-links-inline">
+              <div id="linkChips" class="link-chips"></div>
+              <button id="openLinksBtn" class="add-link-btn" type="button">+ Add link</button>
+            </div>
+          </div>
+
+          <!-- Add-link form (toggled by "+ Add link") -->
+          <div id="linksPanel" class="links-add-panel" hidden>
+            <form id="addLinkForm" class="links-add-form">
+              <input id="linkLabelInput" class="project-input links-label-input" type="text" placeholder="Label (e.g. Google Drive)" autocomplete="off" />
+              <input id="linkUrlInput" class="project-input links-url-input" type="url" placeholder="https://…" autocomplete="off" />
+              <button class="mini-button" type="submit">Add</button>
+              <button id="closeLinksPanelBtn" class="mini-button" type="button">Cancel</button>
+            </form>
+          </div>
+
+          <!-- Row 2: action buttons -->
+          <div class="project-controls">
             <div class="action-buttons">
               <button id="openProjectModalBtn" class="mini-button" type="button">New Project</button>
               <button id="openProjectSettingsBtn" class="mini-button" type="button">Edit Project</button>
