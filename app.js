@@ -560,11 +560,14 @@ function focusTaskTitle(taskId, cursorPosition = null) {
 function wireTaskRow(row, task, index) {
   const titleInput = row.querySelector(".task-title-input");
   autoResizeTextarea(titleInput);
+  requestAnimationFrame(() => autoResizeTextarea(titleInput));
   titleInput.addEventListener("focus", () => {
     autoResizeTextarea(titleInput);
+    requestAnimationFrame(() => autoResizeTextarea(titleInput));
   });
   titleInput.addEventListener("click", () => {
     autoResizeTextarea(titleInput);
+    requestAnimationFrame(() => autoResizeTextarea(titleInput));
   });
   titleInput.addEventListener("input", async (event) => {
     autoResizeTextarea(event.target);
