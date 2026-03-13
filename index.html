@@ -111,16 +111,22 @@
             <div class="dashboard-title">Project Due</div>
             <div id="projectDueSummary" class="list-stack"></div>
           </div>
-          <div class="dashboard-card">
-            <div class="dashboard-title">Members</div>
+          <div class="dashboard-card dashboard-card-clickable" id="membersCard">
+            <button class="dashboard-title dashboard-open-btn" type="button" id="openMembersModalBtn">
+              Members <span class="dashboard-open-icon">↗</span>
+            </button>
             <div id="memberList" class="tag-list"></div>
           </div>
-          <div class="dashboard-card">
-            <div class="dashboard-title">Milestones</div>
+          <div class="dashboard-card dashboard-card-clickable" id="milestonesCard">
+            <button class="dashboard-title dashboard-open-btn" type="button" id="openMilestonesModalBtn">
+              Milestones <span class="dashboard-open-icon">↗</span>
+            </button>
             <div id="milestoneList" class="list-stack"></div>
           </div>
-          <div class="dashboard-card">
-            <div id="dueSoonTitle" class="dashboard-title">Due Soon</div>
+          <div class="dashboard-card dashboard-card-clickable" id="dueSoonCard">
+            <button class="dashboard-title dashboard-open-btn" type="button" id="openDueSoonModalBtn">
+              <span id="dueSoonTitle">Due Soon</span> <span class="dashboard-open-icon">↗</span>
+            </button>
             <div id="dueSoonList" class="list-stack"></div>
           </div>
           <div class="dashboard-card">
@@ -252,6 +258,30 @@
           <button class="text-button close-modal-btn" type="button" data-target="taskModal">Close</button>
         </div>
         <div id="taskModalBody" class="modal-form"></div>
+      </section>
+
+      <section id="membersModal" class="modal-card" hidden>
+        <div class="modal-header">
+          <h2>Members</h2>
+          <button class="text-button close-modal-btn" type="button" data-target="membersModal">Close</button>
+        </div>
+        <div id="membersModalBody" class="modal-form"></div>
+      </section>
+
+      <section id="milestonesModal" class="modal-card" hidden>
+        <div class="modal-header">
+          <h2>Milestones</h2>
+          <button class="text-button close-modal-btn" type="button" data-target="milestonesModal">Close</button>
+        </div>
+        <div id="milestonesModalBody" class="modal-form"></div>
+      </section>
+
+      <section id="dueSoonModal" class="modal-card" hidden>
+        <div class="modal-header">
+          <h2 id="dueSoonModalTitle">Due Soon</h2>
+          <button class="text-button close-modal-btn" type="button" data-target="dueSoonModal">Close</button>
+        </div>
+        <div id="dueSoonModalBody" class="modal-form"></div>
       </section>
     </div>
 

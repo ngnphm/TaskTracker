@@ -78,6 +78,13 @@ const dom = {
   syncStatus: document.querySelector("#syncStatus"),
   userEmail: document.querySelector("#userEmail"),
   signOutBtn: document.querySelector("#signOutBtn"),
+  openMembersModalBtn: document.querySelector("#openMembersModalBtn"),
+  openMilestonesModalBtn: document.querySelector("#openMilestonesModalBtn"),
+  openDueSoonModalBtn: document.querySelector("#openDueSoonModalBtn"),
+  membersModalBody: document.querySelector("#membersModalBody"),
+  milestonesModalBody: document.querySelector("#milestonesModalBody"),
+  dueSoonModalBody: document.querySelector("#dueSoonModalBody"),
+  dueSoonModalTitle: document.querySelector("#dueSoonModalTitle"),
   openLinksBtn: document.querySelector("#openLinksBtn"),
   closeLinksPanelBtn: document.querySelector("#closeLinksPanelBtn"),
   linksPanel: document.querySelector("#linksPanel"),
@@ -253,19 +260,25 @@ function openEditProjectModal() {
   openModal("projectModal");
 }
 
+const ALL_MODAL_IDS = [
+  "projectModal", "milestoneModal", "meetingModal", "collaboratorModal",
+  "memberSettingsModal", "profileModal", "taskModal",
+  "membersModal", "milestonesModal", "dueSoonModal"
+];
+
 function openModal(targetId) {
   dom.modalBackdrop.hidden = false;
-  ["projectModal", "milestoneModal", "meetingModal", "collaboratorModal", "memberSettingsModal", "profileModal", "taskModal"].forEach((id) => {
+  ALL_MODAL_IDS.forEach((id) => {
     const element = document.querySelector(`#${id}`);
-    element.hidden = id !== targetId;
+    if (element) element.hidden = id !== targetId;
   });
 }
 
 function closeModal() {
   dom.modalBackdrop.hidden = true;
-  ["projectModal", "milestoneModal", "meetingModal", "collaboratorModal", "memberSettingsModal", "profileModal", "taskModal"].forEach((id) => {
+  ALL_MODAL_IDS.forEach((id) => {
     const element = document.querySelector(`#${id}`);
-    element.hidden = true;
+    if (element) element.hidden = true;
   });
   activeTaskModalId = null;
   activeMemberSettingsUserId = null;
@@ -411,24 +424,109 @@ function renderMembers() {
     dom.memberList.innerHTML = '<div class="muted-line">No members yet</div>';
     return;
   }
-
-  const canManageCollaborators = isCurrentUserProjectOwner();
-  state.members.forEach((member) => {
-    const isManageable = canManageCollaborators;
-    const tag = document.createElement(isManageable ? "button" : "span");
-    tag.className = `member-tag ${isManageable ? "member-tag-button" : ""}`;
-    tag.textContent = `${member.display_name || member.email || "Member"} · ${member.role}`;
-    if (isManageable) {
-      tag.type = "button";
-      tag.dataset.userId = member.user_id;
-      tag.dataset.memberLabel = member.display_name || member.email || "Member";
-      tag.title = "Click to manage member";
-      tag.addEventListener("click", () => {
-        openMemberSettingsModal(member.user_id);
-      });
-    }
+  // Compact: show first 3 avatars + overflow count
+  const shown = state.members.slice(0, 3);
+  const overflow = state.members.length - shown.length;
+  shown.forEach((member) => {
+    const tag = document.createElement("span");
+    tag.className = "member-tag";
+    tag.textContent = member.display_name || member.email?.split("@")[0] || "Member";
     dom.memberList.appendChild(tag);
   });
+  if (overflow > 0) {
+    const more = document.createElement("span");
+    more.className = "member-tag member-tag-more";
+    more.textContent = `+${overflow} more`;
+    dom.memberList.appendChild(more);
+  }
+}
+
+function openMembersModal() {
+  const body = dom.membersModalBody;
+  body.innerHTML = "";
+  const isOwner = isCurrentUserProjectOwner();
+
+  // ── Member list ──
+  const memberHeading = document.createElement("div");
+  memberHeading.className = "modal-section-heading";
+  memberHeading.textContent = `Members (${state.members.length})`;
+  body.appendChild(memberHeading);
+
+  if (!state.members.length) {
+    const empty = document.createElement("div");
+    empty.className = "muted-line";
+    empty.textContent = "No members yet.";
+    body.appendChild(empty);
+  } else {
+    state.members.forEach((member) => {
+      const row = document.createElement("div");
+      row.className = "modal-list-row";
+      const label = member.display_name || member.email || "Member";
+      row.innerHTML = `
+        <span class="modal-list-name">${label}</span>
+        <span class="modal-list-meta">${member.role}</span>
+        ${isOwner ? `<button class="mini-button modal-list-action" data-uid="${member.user_id}">Manage</button>` : ""}
+      `;
+      if (isOwner) {
+        row.querySelector("[data-uid]").addEventListener("click", () => openMemberSettingsModal(member.user_id));
+      }
+      body.appendChild(row);
+    });
+  }
+
+  // ── Pending invitations ──
+  if (state.invitations.length) {
+    const invHeading = document.createElement("div");
+    invHeading.className = "modal-section-heading";
+    invHeading.textContent = "Pending Invitations";
+    body.appendChild(invHeading);
+    state.invitations.forEach((invite) => {
+      const row = document.createElement("div");
+      row.className = "modal-list-row";
+      row.innerHTML = `
+        <span class="modal-list-name">${invite.email}</span>
+        <span class="modal-list-meta">${invite.role} · ${invite.status}</span>
+      `;
+      body.appendChild(row);
+    });
+  }
+
+  // ── Add collaborator ──
+  if (isOwner) {
+    const addHeading = document.createElement("div");
+    addHeading.className = "modal-section-heading";
+    addHeading.textContent = "Add Collaborator";
+    body.appendChild(addHeading);
+
+    const form = document.createElement("form");
+    form.className = "modal-inline-form";
+    form.innerHTML = `
+      <input class="project-input" type="email" placeholder="Email address" autocomplete="off" required />
+      <select class="project-select modal-inline-select">
+        <option value="editor">Editor</option>
+        <option value="viewer">Viewer</option>
+        <option value="owner">Owner</option>
+      </select>
+      <button class="mini-button" type="submit">Add</button>
+    `;
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const email = form.querySelector("input").value.trim().toLowerCase();
+      const role = form.querySelector("select").value;
+      if (!email) return;
+      const btn = form.querySelector("button");
+      btn.disabled = true;
+      btn.textContent = "Adding…";
+      await doInviteCollaborator(email, role);
+      btn.disabled = false;
+      btn.textContent = "Add";
+      form.querySelector("input").value = "";
+      openMembersModal(); // re-render
+    });
+    body.appendChild(form);
+  }
+
+  openModal("membersModal");
 }
 
 function renderProjectDue() {
@@ -451,25 +549,91 @@ function renderMilestones() {
     dom.milestoneList.innerHTML = '<div class="muted-line">No milestones</div>';
     return;
   }
-  const canRemoveMilestones = isCurrentUserProjectOwner();
-  state.milestones
-    .sort((a, b) => a.position - b.position)
-    .forEach((milestone) => {
-      const label = `${milestone.title}${milestone.due_date ? ` · ${formatDisplayDate(milestone.due_date)}` : ""}`;
-      const item = document.createElement(canRemoveMilestones ? "button" : "div");
-      item.className = `list-item ${canRemoveMilestones ? "list-item-button" : ""}`;
-      item.textContent = label;
-      if (canRemoveMilestones) {
-        item.type = "button";
-        item.title = "Click to remove milestone";
-        item.addEventListener("click", async () => {
-          const confirmed = window.confirm(`Remove milestone "${milestone.title}"?`);
+  // Compact: show first 3
+  const sorted = [...state.milestones].sort((a, b) => a.position - b.position);
+  const overflow = sorted.length - 3;
+  sorted.slice(0, 3).forEach((ms) => {
+    const item = document.createElement("div");
+    item.className = "list-item";
+    item.textContent = `${ms.title}${ms.due_date ? ` · ${formatDisplayDate(ms.due_date)}` : ""}`;
+    dom.milestoneList.appendChild(item);
+  });
+  if (overflow > 0) {
+    const more = document.createElement("div");
+    more.className = "list-item muted-line";
+    more.textContent = `+${overflow} more`;
+    dom.milestoneList.appendChild(more);
+  }
+}
+
+function openMilestonesModal() {
+  const body = dom.milestonesModalBody;
+  body.innerHTML = "";
+  const isOwner = isCurrentUserProjectOwner();
+  const sorted = [...state.milestones].sort((a, b) => a.position - b.position);
+
+  // ── Milestone list ──
+  if (!sorted.length) {
+    const empty = document.createElement("div");
+    empty.className = "muted-line";
+    empty.textContent = "No milestones yet.";
+    body.appendChild(empty);
+  } else {
+    sorted.forEach((ms) => {
+      const row = document.createElement("div");
+      row.className = "modal-list-row";
+      row.innerHTML = `
+        <span class="modal-list-name">${ms.title}</span>
+        <span class="modal-list-meta">${ms.due_date ? formatDisplayDate(ms.due_date) : "No due date"}</span>
+        ${isOwner ? `<button class="mini-button danger-button modal-list-action" data-mid="${ms.id}" data-mtitle="${ms.title}">Delete</button>` : ""}
+      `;
+      if (isOwner) {
+        row.querySelector("[data-mid]").addEventListener("click", async (e) => {
+          const id = e.currentTarget.dataset.mid;
+          const title = e.currentTarget.dataset.mtitle;
+          const confirmed = window.confirm(`Delete milestone "${title}"?`);
           if (!confirmed) return;
-          await removeMilestone(milestone.id, milestone.title);
+          await removeMilestone(id, title);
+          openMilestonesModal(); // re-render
         });
       }
-      dom.milestoneList.appendChild(item);
+      body.appendChild(row);
     });
+  }
+
+  // ── Add milestone ──
+  if (isOwner) {
+    const addHeading = document.createElement("div");
+    addHeading.className = "modal-section-heading";
+    addHeading.textContent = "Add Milestone";
+    body.appendChild(addHeading);
+
+    const form = document.createElement("form");
+    form.className = "modal-inline-form";
+    form.innerHTML = `
+      <input class="project-input" type="text" placeholder="Milestone title" required />
+      <input class="project-input" type="date" title="Due date (optional)" />
+      <button class="mini-button" type="submit">Add</button>
+    `;
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const title = form.querySelector("input[type=text]").value.trim();
+      const due_date = form.querySelector("input[type=date]").value || null;
+      if (!title) return;
+      const btn = form.querySelector("button");
+      btn.disabled = true;
+      btn.textContent = "Adding…";
+      await doAddMilestone(title, due_date);
+      btn.disabled = false;
+      btn.textContent = "Add";
+      form.querySelector("input[type=text]").value = "";
+      form.querySelector("input[type=date]").value = "";
+      openMilestonesModal(); // re-render
+    });
+    body.appendChild(form);
+  }
+
+  openModal("milestonesModal");
 }
 
 function renderMeetings() {
@@ -507,22 +671,59 @@ function renderDueSoon() {
   const dueSoonDays = getSelectedProjectDueSoonDays();
   dom.dueSoonTitle.textContent = `Due Soon (${dueSoonDays} days)`;
   const cutoffDate = addDaysISO(todayISO(), dueSoonDays);
-  const items = state.tasks
+  const allItems = state.tasks
     .filter((task) => !task.archived && task.due_date && (task.due_date <= cutoffDate || isOverdue(task)))
-    .sort((a, b) => String(a.due_date).localeCompare(String(b.due_date)))
-    .slice(0, 6);
+    .sort((a, b) => String(a.due_date).localeCompare(String(b.due_date)));
 
-  if (!items.length) {
+  if (!allItems.length) {
     dom.dueSoonList.innerHTML = `<div class="muted-line">No tasks due in the next ${dueSoonDays} days</div>`;
     return;
   }
 
-  items.forEach((task) => {
+  // Compact: show first 3
+  const overflow = allItems.length - 3;
+  allItems.slice(0, 3).forEach((task) => {
     const item = document.createElement("div");
     item.className = `list-item ${isOverdue(task) ? "is-overdue" : ""}`;
     item.textContent = `${task.title} · ${formatDisplayDate(task.due_date)}`;
     dom.dueSoonList.appendChild(item);
   });
+  if (overflow > 0) {
+    const more = document.createElement("div");
+    more.className = "list-item muted-line";
+    more.textContent = `+${overflow} more`;
+    dom.dueSoonList.appendChild(more);
+  }
+}
+
+function openDueSoonModal() {
+  const body = dom.dueSoonModalBody;
+  body.innerHTML = "";
+  const dueSoonDays = getSelectedProjectDueSoonDays();
+  dom.dueSoonModalTitle.textContent = `Due Soon (${dueSoonDays} days)`;
+  const cutoffDate = addDaysISO(todayISO(), dueSoonDays);
+  const allItems = state.tasks
+    .filter((task) => !task.archived && task.due_date && (task.due_date <= cutoffDate || isOverdue(task)))
+    .sort((a, b) => String(a.due_date).localeCompare(String(b.due_date)));
+
+  if (!allItems.length) {
+    const empty = document.createElement("div");
+    empty.className = "muted-line";
+    empty.textContent = `No tasks due in the next ${dueSoonDays} days.`;
+    body.appendChild(empty);
+  } else {
+    allItems.forEach((task) => {
+      const row = document.createElement("div");
+      row.className = `modal-list-row ${isOverdue(task) ? "is-overdue" : ""}`;
+      row.innerHTML = `
+        <span class="modal-list-name">${task.title}</span>
+        <span class="modal-list-meta ${isOverdue(task) ? "is-overdue-text" : ""}">${formatDisplayDate(task.due_date)}</span>
+      `;
+      body.appendChild(row);
+    });
+  }
+
+  openModal("dueSoonModal");
 }
 
 function shouldShowTask(index, tasks) {
@@ -555,6 +756,7 @@ function renderTaskRow(task, index) {
             ${task.due_date ? `<span class="task-due-badge">${escapeHtml(formatDisplayDate(task.due_date))}</span>` : ""}
             ${getTaskAssigneeLabel(task.id) ? `<span class="assignee-badge">${escapeHtml(getTaskAssigneeLabel(task.id))}</span>` : ""}
             ${task.status === "done" && getTaskCompleterLabel(task) ? `<span class="completion-badge">✓ ${escapeHtml(getTaskCompleterLabel(task))}</span>` : ""}
+            ${(state.comments.filter(c => c.task_id === task.id).length > 0) ? `<button class="task-comment-badge" type="button" title="View comments">💬 ${state.comments.filter(c => c.task_id === task.id).length} comment${state.comments.filter(c => c.task_id === task.id).length !== 1 ? "s" : ""}</button>` : ""}
           </div>
         </div>
       </div>
@@ -707,12 +909,21 @@ function wireTaskRow(row, task, index) {
     await persistProjectData(task.collapsed ? "Subtasks collapsed" : "Subtasks expanded");
   });
 
+  const commentBadge = row.querySelector(".task-comment-badge");
+  if (commentBadge) {
+    commentBadge.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openTaskModal(task.id);
+    });
+  }
+
   row.querySelector(".task-primary").addEventListener("dblclick", (event) => {
     if (
       event.target.closest(".collapse-button") ||
       event.target.closest(".outdent-button") ||
       event.target.closest(".indent-action") ||
-      event.target.closest(".checkbox-wrap")
+      event.target.closest(".checkbox-wrap") ||
+      event.target.closest(".task-comment-badge")
     ) {
       return;
     }
@@ -1342,20 +1553,25 @@ async function updateProjectSettings() {
   setSyncStatus("Project settings saved");
 }
 
-async function addMilestone() {
-  const title = dom.milestoneTitleInput.value.trim();
+async function doAddMilestone(title, due_date) {
   if (!title || !selectedProjectId || !isCurrentUserProjectOwner()) return;
   state.milestones.push({
     id: crypto.randomUUID(),
     project_id: selectedProjectId,
     title,
-    due_date: dom.milestoneDueInput.value || null,
+    due_date: due_date || null,
     position: state.milestones.length
   });
+  await persistProjectData("Milestone added");
+}
+
+async function addMilestone() {
+  const title = dom.milestoneTitleInput.value.trim();
+  if (!title) return;
+  await doAddMilestone(title, dom.milestoneDueInput.value);
   dom.milestoneTitleInput.value = "";
   dom.milestoneDueInput.value = "";
   closeModal();
-  await persistProjectData("Milestone added");
 }
 
 async function removeMilestone(milestoneId, title) {
@@ -1384,10 +1600,9 @@ async function addMeeting() {
   await persistProjectData("Meeting added");
 }
 
-async function inviteCollaborator() {
-  const email = dom.inviteEmailInput.value.trim().toLowerCase();
-  const role = ["owner", "editor", "viewer"].includes(dom.inviteRoleInput.value) ? dom.inviteRoleInput.value : "viewer";
+async function doInviteCollaborator(email, role) {
   if (!email || !selectedProjectId) return;
+  const safeRole = ["owner", "editor", "viewer"].includes(role) ? role : "viewer";
 
   const { data: profile } = await supabaseClient
     .from("profiles")
@@ -1398,7 +1613,7 @@ async function inviteCollaborator() {
   if (profile?.id) {
     const { error } = await supabaseClient
       .from("project_members")
-      .upsert([{ project_id: selectedProjectId, user_id: profile.id, role }], { onConflict: "project_id,user_id" });
+      .upsert([{ project_id: selectedProjectId, user_id: profile.id, role: safeRole }], { onConflict: "project_id,user_id" });
     if (error) {
       console.error(error);
       setSyncStatus(`Could not add collaborator: ${error.message}`, true);
@@ -1406,7 +1621,7 @@ async function inviteCollaborator() {
     }
   } else {
     const { error } = await supabaseClient.from("project_invitations").insert([
-      { project_id: selectedProjectId, email, role, invited_by: session.user.id, status: "pending" }
+      { project_id: selectedProjectId, email, role: safeRole, invited_by: session.user.id, status: "pending" }
     ]);
     if (error) {
       console.error(error);
@@ -1415,11 +1630,17 @@ async function inviteCollaborator() {
     }
   }
 
-  dom.inviteEmailInput.value = "";
-  closeModal();
   await loadProjectData();
   await broadcastProjectChanged("A teammate updated collaborators on this project. Refresh to reload members.");
   setSyncStatus("Collaborator update saved");
+}
+
+async function inviteCollaborator() {
+  const email = dom.inviteEmailInput.value.trim().toLowerCase();
+  if (!email) return;
+  await doInviteCollaborator(email, dom.inviteRoleInput.value);
+  dom.inviteEmailInput.value = "";
+  closeModal();
 }
 
 async function removeCollaborator(userId, label) {
@@ -1691,6 +1912,9 @@ dom.refreshBannerBtn.addEventListener("click", async () => {
 dom.openProfileModalBtn.addEventListener("click", openProfileModal);
 dom.openProjectModalBtn.addEventListener("click", openCreateProjectModal);
 dom.openProjectSettingsBtn.addEventListener("click", openEditProjectModal);
+dom.openMembersModalBtn.addEventListener("click", openMembersModal);
+dom.openMilestonesModalBtn.addEventListener("click", openMilestonesModal);
+dom.openDueSoonModalBtn.addEventListener("click", openDueSoonModal);
 dom.openMilestoneModalBtn.addEventListener("click", () => openModal("milestoneModal"));
 dom.openMeetingModalBtn.addEventListener("click", () => openModal("meetingModal"));
 dom.openCollaboratorModalBtn.addEventListener("click", () => openModal("collaboratorModal"));
