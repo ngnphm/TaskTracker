@@ -29,12 +29,16 @@ const dom = {
   refreshBannerText: document.querySelector("#refreshBannerText"),
   refreshBannerBtn: document.querySelector("#refreshBannerBtn"),
   openProjectModalBtn: document.querySelector("#openProjectModalBtn"),
+  openProjectSettingsBtn: document.querySelector("#openProjectSettingsBtn"),
   openMilestoneModalBtn: document.querySelector("#openMilestoneModalBtn"),
   openMeetingModalBtn: document.querySelector("#openMeetingModalBtn"),
   openCollaboratorModalBtn: document.querySelector("#openCollaboratorModalBtn"),
   projectForm: document.querySelector("#projectForm"),
+  projectModalTitle: document.querySelector("#projectModalTitle"),
   projectNameInput: document.querySelector("#projectNameInput"),
   projectDueInput: document.querySelector("#projectDueInput"),
+  projectDueSoonInput: document.querySelector("#projectDueSoonInput"),
+  projectSubmitBtn: document.querySelector("#projectSubmitBtn"),
   milestoneForm: document.querySelector("#milestoneForm"),
   milestoneTitleInput: document.querySelector("#milestoneTitleInput"),
   milestoneDueInput: document.querySelector("#milestoneDueInput"),
@@ -45,10 +49,16 @@ const dom = {
   inviteForm: document.querySelector("#inviteForm"),
   inviteEmailInput: document.querySelector("#inviteEmailInput"),
   inviteRoleInput: document.querySelector("#inviteRoleInput"),
+  memberSettingsForm: document.querySelector("#memberSettingsForm"),
+  memberSettingsLabel: document.querySelector("#memberSettingsLabel"),
+  memberRoleInput: document.querySelector("#memberRoleInput"),
+  saveMemberSettingsBtn: document.querySelector("#saveMemberSettingsBtn"),
+  removeMemberBtn: document.querySelector("#removeMemberBtn"),
   modalBackdrop: document.querySelector("#modalBackdrop"),
   projectDueSummary: document.querySelector("#projectDueSummary"),
   memberList: document.querySelector("#memberList"),
   milestoneList: document.querySelector("#milestoneList"),
+  dueSoonTitle: document.querySelector("#dueSoonTitle"),
   dueSoonList: document.querySelector("#dueSoonList"),
   meetingList: document.querySelector("#meetingList"),
   invitationList: document.querySelector("#invitationList"),
@@ -80,10 +90,12 @@ let authMode = "signin";
 let projects = [];
 let state = loadLocalState();
 let selectedProjectId = localStorage.getItem("capstone-selected-project-id") || "";
+let projectModalMode = "create";
 const expandedDetailTaskIds = new Set();
 let projectChannel = null;
 const realtimeClientId = crypto.randomUUID();
 let activeTaskModalId = null;
+let activeMemberSettingsUserId = null;
 
 function loadLocalState() {
   const saved = localStorage.getItem(STORAGE_KEY);
@@ -137,6 +149,12 @@ function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
 
+function addDaysISO(isoDate, days) {
+  const base = new Date(`${isoDate}T00:00:00`);
+  base.setDate(base.getDate() + days);
+  return base.toISOString().slice(0, 10);
+}
+
 function normalizeDateValue(value) {
   if (!value) return "";
   const stringValue = String(value).trim();
@@ -149,6 +167,13 @@ function normalizeDateValue(value) {
 function nullableDateValue(value) {
   const normalized = normalizeDateValue(value);
   return normalized || null;
+}
+
+function formatDisplayDate(value) {
+  const normalized = normalizeDateValue(value);
+  if (!normalized) return "";
+  const [year, month, day] = normalized.split("-");
+  return `${day}/${month}/${year.slice(2)}`;
 }
 
 function setSyncStatus(message, isError = false) {
@@ -178,13 +203,45 @@ function getSelectedProject() {
   return projects.find((project) => project.id === selectedProjectId) || null;
 }
 
+function getSelectedProjectDueSoonDays() {
+  const value = Number.parseInt(getSelectedProject()?.due_soon_days, 10);
+  return Number.isFinite(value) && value > 0 ? value : 7;
+}
+
 function isCurrentUserProjectOwner() {
-  return Boolean(session?.user?.id) && getSelectedProject()?.owner_id === session.user.id;
+  if (!session?.user?.id) return false;
+  return state.members.some((member) => member.user_id === session.user.id && member.role === "owner")
+    || getSelectedProject()?.owner_id === session.user.id;
+}
+
+function formatProjectModal(mode) {
+  projectModalMode = mode;
+  const isEdit = mode === "edit";
+  dom.projectModalTitle.textContent = isEdit ? "Edit Project" : "New Project";
+  dom.projectSubmitBtn.textContent = isEdit ? "Save changes" : "Create project";
+}
+
+function openCreateProjectModal() {
+  formatProjectModal("create");
+  dom.projectNameInput.value = "";
+  dom.projectDueInput.value = "";
+  dom.projectDueSoonInput.value = "7";
+  openModal("projectModal");
+}
+
+function openEditProjectModal() {
+  const project = getSelectedProject();
+  if (!project) return;
+  formatProjectModal("edit");
+  dom.projectNameInput.value = project.name || "";
+  dom.projectDueInput.value = normalizeDateValue(project.due_date);
+  dom.projectDueSoonInput.value = String(getSelectedProjectDueSoonDays());
+  openModal("projectModal");
 }
 
 function openModal(targetId) {
   dom.modalBackdrop.hidden = false;
-  ["projectModal", "milestoneModal", "meetingModal", "collaboratorModal", "taskModal"].forEach((id) => {
+  ["projectModal", "milestoneModal", "meetingModal", "collaboratorModal", "memberSettingsModal", "taskModal"].forEach((id) => {
     const element = document.querySelector(`#${id}`);
     element.hidden = id !== targetId;
   });
@@ -192,12 +249,31 @@ function openModal(targetId) {
 
 function closeModal() {
   dom.modalBackdrop.hidden = true;
-  ["projectModal", "milestoneModal", "meetingModal", "collaboratorModal", "taskModal"].forEach((id) => {
+  ["projectModal", "milestoneModal", "meetingModal", "collaboratorModal", "memberSettingsModal", "taskModal"].forEach((id) => {
     const element = document.querySelector(`#${id}`);
     element.hidden = true;
   });
   activeTaskModalId = null;
+  activeMemberSettingsUserId = null;
   dom.taskModalBody.innerHTML = "";
+}
+
+function getOwnerCount() {
+  return state.members.filter((member) => member.role === "owner").length;
+}
+
+function openMemberSettingsModal(userId) {
+  const member = state.members.find((entry) => entry.user_id === userId);
+  if (!member || !isCurrentUserProjectOwner()) return;
+  activeMemberSettingsUserId = userId;
+  dom.memberSettingsLabel.textContent = member.display_name || member.email || "Member";
+  dom.memberRoleInput.value = member.role;
+  const isSelf = userId === session?.user?.id;
+  const isLastOwner = member.role === "owner" && getOwnerCount() <= 1;
+  dom.memberRoleInput.disabled = isSelf && isLastOwner;
+  dom.saveMemberSettingsBtn.disabled = isSelf && isLastOwner;
+  dom.removeMemberBtn.disabled = isSelf || isLastOwner;
+  openModal("memberSettingsModal");
 }
 
 function getTaskAssigneeId(taskId) {
@@ -292,10 +368,12 @@ function renderProjects() {
     option.value = "";
     dom.projectSelect.appendChild(option);
     dom.projectSelect.disabled = true;
+    dom.openProjectSettingsBtn.disabled = true;
     return;
   }
 
   dom.projectSelect.disabled = false;
+  dom.openProjectSettingsBtn.disabled = false;
   projects.forEach((project) => {
     const option = document.createElement("option");
     option.value = project.id;
@@ -315,21 +393,19 @@ function renderMembers() {
     return;
   }
 
-  const canRemoveCollaborators = isCurrentUserProjectOwner();
+  const canManageCollaborators = isCurrentUserProjectOwner();
   state.members.forEach((member) => {
-    const isRemovable = canRemoveCollaborators && member.role !== "owner" && member.user_id !== session?.user?.id;
-    const tag = document.createElement(isRemovable ? "button" : "span");
-    tag.className = `member-tag ${isRemovable ? "member-tag-button" : ""}`;
+    const isManageable = canManageCollaborators;
+    const tag = document.createElement(isManageable ? "button" : "span");
+    tag.className = `member-tag ${isManageable ? "member-tag-button" : ""}`;
     tag.textContent = `${member.display_name || member.email || "Member"} · ${member.role}`;
-    if (isRemovable) {
+    if (isManageable) {
       tag.type = "button";
       tag.dataset.userId = member.user_id;
       tag.dataset.memberLabel = member.display_name || member.email || "Member";
-      tag.title = "Click to remove collaborator";
-      tag.addEventListener("click", async () => {
-        const confirmed = window.confirm(`Remove ${tag.dataset.memberLabel} from this project?`);
-        if (!confirmed) return;
-        await removeCollaborator(member.user_id, tag.dataset.memberLabel);
+      tag.title = "Click to manage member";
+      tag.addEventListener("click", () => {
+        openMemberSettingsModal(member.user_id);
       });
     }
     dom.memberList.appendChild(tag);
@@ -346,7 +422,7 @@ function renderProjectDue() {
 
   const item = document.createElement("div");
   item.className = `list-item ${project.due_date < todayISO() ? "is-overdue" : ""}`;
-  item.textContent = project.due_date;
+  item.textContent = formatDisplayDate(project.due_date);
   dom.projectDueSummary.appendChild(item);
 }
 
@@ -360,7 +436,7 @@ function renderMilestones() {
   state.milestones
     .sort((a, b) => a.position - b.position)
     .forEach((milestone) => {
-      const label = `${milestone.title}${milestone.due_date ? ` · ${milestone.due_date}` : ""}`;
+      const label = `${milestone.title}${milestone.due_date ? ` · ${formatDisplayDate(milestone.due_date)}` : ""}`;
       const item = document.createElement(canRemoveMilestones ? "button" : "div");
       item.className = `list-item ${canRemoveMilestones ? "list-item-button" : ""}`;
       item.textContent = label;
@@ -409,20 +485,23 @@ function renderInvitations() {
 
 function renderDueSoon() {
   dom.dueSoonList.innerHTML = "";
+  const dueSoonDays = getSelectedProjectDueSoonDays();
+  dom.dueSoonTitle.textContent = `Due Soon (${dueSoonDays} days)`;
+  const cutoffDate = addDaysISO(todayISO(), dueSoonDays);
   const items = state.tasks
-    .filter((task) => !task.archived && task.due_date)
+    .filter((task) => !task.archived && task.due_date && (task.due_date <= cutoffDate || isOverdue(task)))
     .sort((a, b) => String(a.due_date).localeCompare(String(b.due_date)))
     .slice(0, 6);
 
   if (!items.length) {
-    dom.dueSoonList.innerHTML = '<div class="muted-line">No dated tasks</div>';
+    dom.dueSoonList.innerHTML = `<div class="muted-line">No tasks due in the next ${dueSoonDays} days</div>`;
     return;
   }
 
   items.forEach((task) => {
     const item = document.createElement("div");
     item.className = `list-item ${isOverdue(task) ? "is-overdue" : ""}`;
-    item.textContent = `${task.title} · ${task.due_date}`;
+    item.textContent = `${task.title} · ${formatDisplayDate(task.due_date)}`;
     dom.dueSoonList.appendChild(item);
   });
 }
@@ -454,6 +533,7 @@ function renderTaskRow(task, index) {
         <div class="task-title-wrap">
           <textarea class="task-title-input ${task.status === "done" ? "is-complete" : ""} task-level-${Math.min(task.level, 4)}" placeholder="Checklist item">${escapeHtml(task.title)}</textarea>
           <div class="task-badges">
+            ${task.due_date ? `<span class="task-due-badge">${escapeHtml(formatDisplayDate(task.due_date))}</span>` : ""}
             ${getTaskAssigneeLabel(task.id) ? `<span class="assignee-badge">${escapeHtml(getTaskAssigneeLabel(task.id))}</span>` : ""}
             ${task.status === "done" && getTaskCompleterLabel(task) ? `<span class="completion-badge">✓ ${escapeHtml(getTaskCompleterLabel(task))}</span>` : ""}
           </div>
@@ -533,6 +613,8 @@ function renderApp() {
   dom.pageTitle.textContent = getProjectName();
   renderAuth();
   renderProjects();
+  dom.openProjectSettingsBtn.hidden = !selectedProjectId;
+  dom.openProjectSettingsBtn.disabled = !selectedProjectId || !isCurrentUserProjectOwner();
   renderProjectDue();
   renderMembers();
   renderMilestones();
@@ -827,7 +909,12 @@ function isOverdue(task) {
 function formatDateTime(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString();
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const year = String(date.getFullYear()).slice(2);
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${day}/${month}/${year}, ${hours}:${minutes}`;
 }
 
 function addSubtask(parentIndex) {
@@ -896,7 +983,7 @@ async function loadProjects() {
   await acceptPendingInvitations();
   const { data, error } = await supabaseClient
     .from("projects")
-    .select("id, name, owner_id, due_date")
+    .select("id, name, owner_id, due_date, due_soon_days")
     .order("created_at", { ascending: true });
   if (error) {
     console.error(error);
@@ -1149,11 +1236,19 @@ async function persistProjectData(message, rerender = true) {
 
 async function createProject(name) {
   if (!supabaseClient || !session || !name.trim()) return;
+  const dueSoonDays = Number.parseInt(dom.projectDueSoonInput.value, 10);
   setSyncStatus("Creating project...");
   const { data, error } = await supabaseClient
     .from("projects")
-    .insert([{ owner_id: session.user.id, name: name.trim(), due_date: dom.projectDueInput.value || null }])
-    .select("id, name, owner_id, due_date")
+    .insert([
+      {
+        owner_id: session.user.id,
+        name: name.trim(),
+        due_date: dom.projectDueInput.value || null,
+        due_soon_days: Number.isFinite(dueSoonDays) && dueSoonDays > 0 ? dueSoonDays : 7
+      }
+    ])
+    .select("id, name, owner_id, due_date, due_soon_days")
     .single();
   if (error) {
     console.error(error);
@@ -1164,8 +1259,42 @@ async function createProject(name) {
   saveSelectedProject(data.id);
   dom.projectNameInput.value = "";
   dom.projectDueInput.value = "";
+  dom.projectDueSoonInput.value = "7";
   closeModal();
   await loadProjectData();
+}
+
+async function updateProjectSettings() {
+  const project = getSelectedProject();
+  const name = dom.projectNameInput.value.trim();
+  if (!supabaseClient || !session || !project || !name) return;
+
+  const dueSoonDays = Number.parseInt(dom.projectDueSoonInput.value, 10);
+  const payload = {
+    name,
+    due_date: dom.projectDueInput.value || null,
+    due_soon_days: Number.isFinite(dueSoonDays) && dueSoonDays > 0 ? dueSoonDays : 7
+  };
+
+  setSyncStatus("Saving project settings...");
+  const { data, error } = await supabaseClient
+    .from("projects")
+    .update(payload)
+    .eq("id", project.id)
+    .select("id, name, owner_id, due_date, due_soon_days")
+    .single();
+
+  if (error) {
+    console.error(error);
+    setSyncStatus(`Could not update project: ${error.message}`, true);
+    return;
+  }
+
+  projects = projects.map((entry) => (entry.id === data.id ? data : entry));
+  closeModal();
+  renderApp();
+  await broadcastProjectChanged("Project settings changed. Refresh to load the latest details.");
+  setSyncStatus("Project settings saved");
 }
 
 async function addMilestone() {
@@ -1212,7 +1341,7 @@ async function addMeeting() {
 
 async function inviteCollaborator() {
   const email = dom.inviteEmailInput.value.trim().toLowerCase();
-  const role = dom.inviteRoleInput.value;
+  const role = ["owner", "editor", "viewer"].includes(dom.inviteRoleInput.value) ? dom.inviteRoleInput.value : "viewer";
   if (!email || !selectedProjectId) return;
 
   const { data: profile } = await supabaseClient
@@ -1250,6 +1379,11 @@ async function inviteCollaborator() {
 
 async function removeCollaborator(userId, label) {
   if (!supabaseClient || !selectedProjectId || !isCurrentUserProjectOwner()) return;
+  const member = state.members.find((entry) => entry.user_id === userId);
+  if (member?.role === "owner" && getOwnerCount() <= 1) {
+    setSyncStatus("At least one owner must remain on the project.", true);
+    return;
+  }
   const { error } = await supabaseClient
     .from("project_members")
     .delete()
@@ -1265,6 +1399,33 @@ async function removeCollaborator(userId, label) {
   state.assignees = state.assignees.filter((entry) => entry.user_id !== userId);
   await persistProjectData(`${label} removed`);
   await loadProjectData();
+}
+
+async function updateCollaboratorRole(userId, nextRole) {
+  if (!supabaseClient || !selectedProjectId || !isCurrentUserProjectOwner()) return;
+  const member = state.members.find((entry) => entry.user_id === userId);
+  if (!member || !["viewer", "editor", "owner"].includes(nextRole)) return;
+  if (member.role === "owner" && nextRole !== "owner" && getOwnerCount() <= 1) {
+    setSyncStatus("At least one owner must remain on the project.", true);
+    return;
+  }
+
+  const { error } = await supabaseClient
+    .from("project_members")
+    .update({ role: nextRole })
+    .eq("project_id", selectedProjectId)
+    .eq("user_id", userId);
+
+  if (error) {
+    console.error(error);
+    setSyncStatus(`Could not update member role: ${error.message}`, true);
+    return;
+  }
+
+  closeModal();
+  await loadProjectData();
+  await broadcastProjectChanged("A teammate updated member roles. Refresh to reload member permissions.");
+  setSyncStatus("Member role updated");
 }
 
 async function handleAuthSubmit(event) {
@@ -1355,6 +1516,10 @@ dom.newTaskForm.addEventListener("submit", async (event) => {
 dom.authForm.addEventListener("submit", handleAuthSubmit);
 dom.projectForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (projectModalMode === "edit") {
+    await updateProjectSettings();
+    return;
+  }
   await createProject(dom.projectNameInput.value);
 });
 dom.projectSelect.addEventListener("change", async (event) => {
@@ -1365,7 +1530,8 @@ dom.projectSelect.addEventListener("change", async (event) => {
 dom.refreshBannerBtn.addEventListener("click", async () => {
   await loadProjectData();
 });
-dom.openProjectModalBtn.addEventListener("click", () => openModal("projectModal"));
+dom.openProjectModalBtn.addEventListener("click", openCreateProjectModal);
+dom.openProjectSettingsBtn.addEventListener("click", openEditProjectModal);
 dom.openMilestoneModalBtn.addEventListener("click", () => openModal("milestoneModal"));
 dom.openMeetingModalBtn.addEventListener("click", () => openModal("meetingModal"));
 dom.openCollaboratorModalBtn.addEventListener("click", () => openModal("collaboratorModal"));
@@ -1386,6 +1552,21 @@ dom.meetingForm.addEventListener("submit", async (event) => {
 dom.inviteForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   await inviteCollaborator();
+});
+dom.memberSettingsForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!activeMemberSettingsUserId) return;
+  await updateCollaboratorRole(activeMemberSettingsUserId, dom.memberRoleInput.value);
+});
+dom.removeMemberBtn.addEventListener("click", async () => {
+  if (!activeMemberSettingsUserId) return;
+  const member = state.members.find((entry) => entry.user_id === activeMemberSettingsUserId);
+  if (!member) return;
+  const label = member.display_name || member.email || "Member";
+  const confirmed = window.confirm(`Remove ${label} from this project?`);
+  if (!confirmed) return;
+  await removeCollaborator(member.user_id, label);
+  closeModal();
 });
 dom.authToggleBtn.addEventListener("click", () => {
   authMode = authMode === "signin" ? "signup" : "signin";

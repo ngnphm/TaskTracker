@@ -13,6 +13,8 @@ create table public.projects (
   name text not null,
   description text,
   color text default '#4f7cff',
+  due_date date,
+  due_soon_days integer not null default 7,
   archived boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -203,9 +205,10 @@ set search_path = public
 as $$
   select exists (
     select 1
-    from public.projects p
-    where p.id = p_project_id
-      and p.owner_id = auth.uid()
+    from public.project_members pm
+    where pm.project_id = p_project_id
+      and pm.user_id = auth.uid()
+      and pm.role = 'owner'
   );
 $$;
 
@@ -264,7 +267,7 @@ using (auth.uid() = id);
 create policy "projects_select_members"
 on public.projects
 for select
-using (public.is_project_member(id) or owner_id = auth.uid());
+using (public.is_project_member(id) or public.is_project_owner(id));
 
 create policy "projects_insert_owner"
 on public.projects
@@ -274,12 +277,12 @@ with check (owner_id = auth.uid());
 create policy "projects_update_owner"
 on public.projects
 for update
-using (owner_id = auth.uid());
+using (public.is_project_owner(id));
 
 create policy "projects_delete_owner"
 on public.projects
 for delete
-using (owner_id = auth.uid());
+using (public.is_project_owner(id));
 
 create policy "project_members_select_members"
 on public.project_members

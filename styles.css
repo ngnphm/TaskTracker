@@ -571,6 +571,26 @@ h1 {
   white-space: nowrap;
 }
 
+.task-due-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: var(--surface);
+  color: var(--muted);
+  border: 1px solid var(--line);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.task-row.is-overdue .task-due-badge {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: rgba(204, 82, 82, 0.24);
+}
+
 .assignee-badge {
   display: inline-flex;
   align-items: center;
@@ -929,6 +949,28 @@ h1 {
 }
 
 .modal-form { display: grid; gap: 12px; }
+
+.member-settings-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.danger-button {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border: 1px solid #FECACA;
+}
+
+.danger-button:hover:not(:disabled) {
+  background: #FECACA;
+}
+
+.danger-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
 
 .field-label {
   color: var(--muted);

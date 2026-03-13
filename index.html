@@ -63,6 +63,7 @@
             </label>
             <div class="action-buttons">
               <button id="openProjectModalBtn" class="mini-button" type="button">New Project</button>
+              <button id="openProjectSettingsBtn" class="mini-button" type="button">Edit Project</button>
               <button id="openMilestoneModalBtn" class="mini-button" type="button">New Milestone</button>
               <button id="openMeetingModalBtn" class="mini-button" type="button">Add Meeting</button>
               <button id="openCollaboratorModalBtn" class="mini-button" type="button">Add Collaborator</button>
@@ -99,7 +100,7 @@
             <div id="milestoneList" class="list-stack"></div>
           </div>
           <div class="dashboard-card">
-            <div class="dashboard-title">Due Soon</div>
+            <div id="dueSoonTitle" class="dashboard-title">Due Soon</div>
             <div id="dueSoonList" class="list-stack"></div>
           </div>
           <div class="dashboard-card">
@@ -139,14 +140,16 @@
     <div id="modalBackdrop" class="modal-backdrop" hidden>
       <section id="projectModal" class="modal-card" hidden>
         <div class="modal-header">
-          <h2>New Project</h2>
+          <h2 id="projectModalTitle">New Project</h2>
           <button class="text-button close-modal-btn" type="button" data-target="projectModal">Close</button>
         </div>
         <form id="projectForm" class="modal-form">
           <input id="projectNameInput" class="project-input" type="text" placeholder="Project name" />
           <label class="field-label" for="projectDueInput">Project due date</label>
           <input id="projectDueInput" class="project-input" type="date" />
-          <button class="mini-button" type="submit">Create project</button>
+          <label class="field-label" for="projectDueSoonInput">Due soon window (days)</label>
+          <input id="projectDueSoonInput" class="project-input" type="number" min="1" max="60" step="1" placeholder="7" />
+          <button id="projectSubmitBtn" class="mini-button" type="submit">Create project</button>
         </form>
       </section>
 
@@ -183,11 +186,31 @@
         <form id="inviteForm" class="modal-form">
           <input id="inviteEmailInput" class="project-input" type="email" placeholder="Collaborator email" />
           <select id="inviteRoleInput" class="project-select">
+            <option value="owner">Owner</option>
             <option value="editor">Editor</option>
             <option value="viewer">Viewer</option>
-            <option value="member">Member</option>
           </select>
           <button class="mini-button" type="submit">Add collaborator</button>
+        </form>
+      </section>
+
+      <section id="memberSettingsModal" class="modal-card" hidden>
+        <div class="modal-header">
+          <h2>Member Settings</h2>
+          <button class="text-button close-modal-btn" type="button" data-target="memberSettingsModal">Close</button>
+        </div>
+        <form id="memberSettingsForm" class="modal-form">
+          <div id="memberSettingsLabel" class="muted-line"></div>
+          <label class="field-label" for="memberRoleInput">Role</label>
+          <select id="memberRoleInput" class="project-select">
+            <option value="viewer">Viewer</option>
+            <option value="editor">Editor</option>
+            <option value="owner">Owner</option>
+          </select>
+          <div class="member-settings-actions">
+            <button id="saveMemberSettingsBtn" class="mini-button" type="submit">Save role</button>
+            <button id="removeMemberBtn" class="mini-button danger-button" type="button">Remove collaborator</button>
+          </div>
         </form>
       </section>
 
