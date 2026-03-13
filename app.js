@@ -28,6 +28,7 @@ const dom = {
   refreshBanner: document.querySelector("#refreshBanner"),
   refreshBannerText: document.querySelector("#refreshBannerText"),
   refreshBannerBtn: document.querySelector("#refreshBannerBtn"),
+  openProfileModalBtn: document.querySelector("#openProfileModalBtn"),
   openProjectModalBtn: document.querySelector("#openProjectModalBtn"),
   openProjectSettingsBtn: document.querySelector("#openProjectSettingsBtn"),
   openMilestoneModalBtn: document.querySelector("#openMilestoneModalBtn"),
@@ -54,6 +55,8 @@ const dom = {
   memberRoleInput: document.querySelector("#memberRoleInput"),
   saveMemberSettingsBtn: document.querySelector("#saveMemberSettingsBtn"),
   removeMemberBtn: document.querySelector("#removeMemberBtn"),
+  profileForm: document.querySelector("#profileForm"),
+  profileDisplayNameInput: document.querySelector("#profileDisplayNameInput"),
   modalBackdrop: document.querySelector("#modalBackdrop"),
   projectDueSummary: document.querySelector("#projectDueSummary"),
   memberList: document.querySelector("#memberList"),
@@ -96,6 +99,7 @@ let projectChannel = null;
 const realtimeClientId = crypto.randomUUID();
 let activeTaskModalId = null;
 let activeMemberSettingsUserId = null;
+let currentProfile = null;
 
 function loadLocalState() {
   const saved = localStorage.getItem(STORAGE_KEY);
@@ -241,7 +245,7 @@ function openEditProjectModal() {
 
 function openModal(targetId) {
   dom.modalBackdrop.hidden = false;
-  ["projectModal", "milestoneModal", "meetingModal", "collaboratorModal", "memberSettingsModal", "taskModal"].forEach((id) => {
+  ["projectModal", "milestoneModal", "meetingModal", "collaboratorModal", "memberSettingsModal", "profileModal", "taskModal"].forEach((id) => {
     const element = document.querySelector(`#${id}`);
     element.hidden = id !== targetId;
   });
@@ -249,13 +253,18 @@ function openModal(targetId) {
 
 function closeModal() {
   dom.modalBackdrop.hidden = true;
-  ["projectModal", "milestoneModal", "meetingModal", "collaboratorModal", "memberSettingsModal", "taskModal"].forEach((id) => {
+  ["projectModal", "milestoneModal", "meetingModal", "collaboratorModal", "memberSettingsModal", "profileModal", "taskModal"].forEach((id) => {
     const element = document.querySelector(`#${id}`);
     element.hidden = true;
   });
   activeTaskModalId = null;
   activeMemberSettingsUserId = null;
   dom.taskModalBody.innerHTML = "";
+}
+
+function openProfileModal() {
+  dom.profileDisplayNameInput.value = currentProfile?.display_name || "";
+  openModal("profileModal");
 }
 
 function getOwnerCount() {
@@ -587,7 +596,7 @@ function renderAuth() {
   const signedIn = Boolean(session);
   dom.authCard.hidden = signedIn;
   dom.appCard.hidden = !signedIn;
-  dom.userEmail.textContent = signedIn ? session.user.email : "";
+  dom.userEmail.textContent = signedIn ? currentProfile?.display_name || session.user.email : "";
 
   if (!supabaseClient) {
     dom.authCard.hidden = false;
@@ -606,6 +615,24 @@ function renderAuth() {
   dom.authSubmitBtn.textContent = authMode === "signin" ? "Sign in" : "Create account";
   dom.authToggleBtn.textContent =
     authMode === "signin" ? "Need an account? Create one" : "Already have an account? Sign in";
+}
+
+async function loadCurrentProfile() {
+  if (!supabaseClient || !session?.user?.id) {
+    currentProfile = null;
+    return;
+  }
+  const { data, error } = await supabaseClient
+    .from("profiles")
+    .select("id, email, display_name")
+    .eq("id", session.user.id)
+    .maybeSingle();
+  if (error) {
+    console.error(error);
+    setSyncStatus(`Could not load profile: ${error.message}`, true);
+    return;
+  }
+  currentProfile = data || { id: session.user.id, email: session.user.email || "", display_name: "" };
 }
 
 function renderApp() {
@@ -1428,6 +1455,35 @@ async function updateCollaboratorRole(userId, nextRole) {
   setSyncStatus("Member role updated");
 }
 
+async function updateProfileDisplayName() {
+  if (!supabaseClient || !session?.user?.id) return;
+  const displayName = dom.profileDisplayNameInput.value.trim();
+  const { data, error } = await supabaseClient
+    .from("profiles")
+    .upsert(
+      [{ id: session.user.id, email: session.user.email || "", display_name: displayName || null }],
+      { onConflict: "id" }
+    )
+    .select("id, email, display_name")
+    .single();
+
+  if (error) {
+    console.error(error);
+    setSyncStatus(`Could not update profile: ${error.message}`, true);
+    return;
+  }
+
+  currentProfile = data;
+  closeModal();
+  if (selectedProjectId) {
+    await loadProjectData();
+    await broadcastProjectChanged("A teammate updated their profile name. Refresh to reload member labels.");
+  } else {
+    renderApp();
+  }
+  setSyncStatus("Profile saved");
+}
+
 async function handleAuthSubmit(event) {
   event.preventDefault();
   if (!supabaseClient) {
@@ -1462,6 +1518,7 @@ async function handleAuthSubmit(event) {
     renderAuth();
     return;
   }
+  await loadCurrentProfile();
   await loadProjects();
 }
 
@@ -1470,6 +1527,7 @@ async function handleSignOut() {
   teardownProjectRealtimeSubscription();
   await supabaseClient.auth.signOut();
   session = null;
+  currentProfile = null;
   projects = [];
   saveSelectedProject("");
   resetProjectState();
@@ -1489,13 +1547,18 @@ async function initializeAuth() {
   }
   session = data.session;
   renderApp();
-  if (session) await loadProjects();
+  if (session) {
+    await loadCurrentProfile();
+    await loadProjects();
+  }
   supabaseClient.auth.onAuthStateChange(async (_event, nextSession) => {
     session = nextSession;
     if (session) {
+      await loadCurrentProfile();
       await loadProjects();
     } else {
       teardownProjectRealtimeSubscription();
+      currentProfile = null;
       projects = [];
       saveSelectedProject("");
       resetProjectState();
@@ -1530,6 +1593,7 @@ dom.projectSelect.addEventListener("change", async (event) => {
 dom.refreshBannerBtn.addEventListener("click", async () => {
   await loadProjectData();
 });
+dom.openProfileModalBtn.addEventListener("click", openProfileModal);
 dom.openProjectModalBtn.addEventListener("click", openCreateProjectModal);
 dom.openProjectSettingsBtn.addEventListener("click", openEditProjectModal);
 dom.openMilestoneModalBtn.addEventListener("click", () => openModal("milestoneModal"));
@@ -1552,6 +1616,10 @@ dom.meetingForm.addEventListener("submit", async (event) => {
 dom.inviteForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   await inviteCollaborator();
+});
+dom.profileForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await updateProfileDisplayName();
 });
 dom.memberSettingsForm.addEventListener("submit", async (event) => {
   event.preventDefault();

@@ -49,6 +49,7 @@
           <div class="header-actions">
             <span id="userEmail" class="user-chip"></span>
             <span id="syncStatus" class="sync-chip">Signed out</span>
+            <button id="openProfileModalBtn" class="text-button" type="button">Profile</button>
             <button id="resetDataBtn" class="text-button" type="button">Reset</button>
             <button id="exportBtn" class="text-button" type="button">Export</button>
             <button id="signOutBtn" class="text-button" type="button">Sign out</button>
@@ -211,6 +212,18 @@
             <button id="saveMemberSettingsBtn" class="mini-button" type="submit">Save role</button>
             <button id="removeMemberBtn" class="mini-button danger-button" type="button">Remove collaborator</button>
           </div>
+        </form>
+      </section>
+
+      <section id="profileModal" class="modal-card" hidden>
+        <div class="modal-header">
+          <h2>Profile</h2>
+          <button class="text-button close-modal-btn" type="button" data-target="profileModal">Close</button>
+        </div>
+        <form id="profileForm" class="modal-form">
+          <label class="field-label" for="profileDisplayNameInput">Display name</label>
+          <input id="profileDisplayNameInput" class="project-input" type="text" placeholder="Your name" />
+          <button class="mini-button" type="submit">Save profile</button>
         </form>
       </section>
 
