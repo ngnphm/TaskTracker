@@ -438,20 +438,19 @@ function renderTaskRow(task, index) {
   const row = document.createElement("article");
   row.className = `task-row ${isOverdue(task) ? "is-overdue" : ""}`;
   row.dataset.id = task.id;
+  row.dataset.level = Math.min(task.level, 4);
 
-  const leftPadding = 16 + task.level * 24;
+  const leftPadding = 16 + task.level * 22;
 
   row.innerHTML = `
     <div class="task-main-row">
-      <button class="inline-delete-task-button" type="button" aria-label="Delete task">×</button>
       <div class="task-primary" style="padding-left:${leftPadding}px">
-        <button class="indent-button collapse-button" type="button" aria-label="Collapse task">${task.collapsed ? "+" : "-"}</button>
+        <button class="indent-button collapse-button" type="button" aria-label="Collapse task">${task.collapsed ? "▶" : "▾"}</button>
         <button class="indent-button outdent-button" type="button" aria-label="Remove sub-task">←</button>
         <button class="indent-button indent-action" type="button" aria-label="Make sub-task">→</button>
         <label class="checkbox-wrap">
           <input class="task-check" type="checkbox" ${task.status === "done" ? "checked" : ""} />
         </label>
-        <button class="inline-add-subtask-button ${task.status === "done" ? "is-complete" : ""}" type="button" aria-label="Add sub-task">+</button>
         <div class="task-title-wrap">
           <textarea class="task-title-input ${task.status === "done" ? "is-complete" : ""} task-level-${Math.min(task.level, 4)}" placeholder="Checklist item">${escapeHtml(task.title)}</textarea>
           <div class="task-badges">
@@ -459,6 +458,10 @@ function renderTaskRow(task, index) {
             ${task.status === "done" && getTaskCompleterLabel(task) ? `<span class="completion-badge">✓ ${escapeHtml(getTaskCompleterLabel(task))}</span>` : ""}
           </div>
         </div>
+      </div>
+      <div class="task-row-actions">
+        <button class="inline-add-subtask-button ${task.status === "done" ? "is-complete" : ""}" type="button" aria-label="Add sub-task" title="Add sub-task">+</button>
+        <button class="inline-delete-task-button" type="button" aria-label="Delete task" title="Delete task">×</button>
       </div>
     </div>
   `;
@@ -583,12 +586,10 @@ function wireTaskRow(row, task, index) {
 
   row.querySelector(".task-primary").addEventListener("dblclick", (event) => {
     if (
-      event.target.closest(".inline-delete-task-button") ||
       event.target.closest(".collapse-button") ||
       event.target.closest(".outdent-button") ||
       event.target.closest(".indent-action") ||
-      event.target.closest(".checkbox-wrap") ||
-      event.target.closest(".inline-add-subtask-button")
+      event.target.closest(".checkbox-wrap")
     ) {
       return;
     }
