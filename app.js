@@ -537,10 +537,27 @@ function renderProjectDue() {
     return;
   }
 
+  const today = todayISO();
+  const msPerDay = 1000 * 60 * 60 * 24;
+  const diffMs = new Date(`${project.due_date}T00:00:00`) - new Date(`${today}T00:00:00`);
+  const diffDays = Math.round(diffMs / msPerDay);
+  const isOverdue = diffDays < 0;
+
+  let countdown;
+  if (diffDays === 0) countdown = "Due today";
+  else if (diffDays === 1) countdown = "1 day left";
+  else if (isOverdue) countdown = `${Math.abs(diffDays)} days overdue`;
+  else countdown = `${diffDays} days left`;
+
   const item = document.createElement("div");
-  item.className = `list-item ${project.due_date < todayISO() ? "is-overdue" : ""}`;
+  item.className = `list-item ${isOverdue ? "is-overdue" : ""}`;
   item.textContent = formatDisplayDate(project.due_date);
   dom.projectDueSummary.appendChild(item);
+
+  const countdownEl = document.createElement("div");
+  countdownEl.className = `project-due-countdown ${isOverdue ? "is-overdue" : diffDays <= 7 ? "due-soon" : ""}`;
+  countdownEl.textContent = countdown;
+  dom.projectDueSummary.appendChild(countdownEl);
 }
 
 function renderMilestones() {
@@ -1247,7 +1264,7 @@ async function loadProjects() {
     return;
   }
   if (!projects.some((project) => project.id === selectedProjectId)) {
-    saveSelectedProject(projects[0].id);
+    saveSelectedProject(projects[projects.length - 1].id);
   }
   setupProjectRealtimeSubscription();
   await loadProjectData();
@@ -1494,7 +1511,10 @@ async function createProject(name) {
   if (!supabaseClient || !session || !name.trim()) return;
   const dueSoonDays = Number.parseInt(dom.projectDueSoonInput.value, 10);
   setSyncStatus("Creating project...");
-  const { data, error } = await supabaseClient
+
+  // Insert without .select() to avoid PostgREST mis-reporting a SELECT RLS
+  // violation as an INSERT violation before the owner-member trigger fires.
+  const { error } = await supabaseClient
     .from("projects")
     .insert([
       {
@@ -1503,21 +1523,20 @@ async function createProject(name) {
         due_date: dom.projectDueInput.value || null,
         due_soon_days: Number.isFinite(dueSoonDays) && dueSoonDays > 0 ? dueSoonDays : 7
       }
-    ])
-    .select("id, name, owner_id, due_date, due_soon_days")
-    .single();
+    ]);
   if (error) {
     console.error(error);
     setSyncStatus(`Could not create project: ${error.message}`, true);
     return;
   }
-  projects.push(data);
-  saveSelectedProject(data.id);
+
   dom.projectNameInput.value = "";
   dom.projectDueInput.value = "";
   dom.projectDueSoonInput.value = "7";
   closeModal();
-  await loadProjectData();
+
+  // Reload the full project list — the new project will appear and be selected.
+  await loadProjects();
 }
 
 async function updateProjectSettings() {

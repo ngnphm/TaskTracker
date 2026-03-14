@@ -419,6 +419,16 @@ h1 {
 .list-item.is-overdue { color: var(--danger); font-weight: 500; }
 .muted-line { color: var(--muted-light); font-style: italic; }
 
+.project-due-countdown {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-top: 4px;
+  letter-spacing: -0.3px;
+}
+.project-due-countdown.due-soon { color: #D97706; }
+.project-due-countdown.is-overdue { color: var(--danger); }
+
 /* ─── Task List ─────────────────────────────────────────────────── */
 .task-list { display: grid; }
 
