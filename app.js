@@ -127,6 +127,7 @@ const taskSaveQueues = new Map();
 const titleSaveTimers = new Map();
 const titleSaveVersions = new Map();
 let consistencyReloadTimer = null;
+let authResyncInFlight = null;
 
 function loadLocalState() {
   const saved = localStorage.getItem(STORAGE_KEY);
@@ -284,6 +285,72 @@ function setSyncStatus(message, isError = false) {
 function setAuthStatus(message, isError = false) {
   dom.authStatus.textContent = message;
   dom.authStatus.dataset.error = isError ? "true" : "false";
+}
+
+async function ensureActiveSession(options = {}) {
+  if (!supabaseClient) return null;
+  if (authResyncInFlight) {
+    return authResyncInFlight;
+  }
+
+  authResyncInFlight = (async () => {
+    const { data, error } = await supabaseClient.auth.getSession();
+    if (error) throw error;
+
+    let nextSession = data.session || null;
+    const expiresAt = Number(nextSession?.expires_at || 0);
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const shouldRefresh = nextSession && expiresAt > 0 && expiresAt - nowSeconds < 120;
+
+    if (shouldRefresh) {
+      const refreshResult = await supabaseClient.auth.refreshSession();
+      if (refreshResult.error) throw refreshResult.error;
+      nextSession = refreshResult.data.session || nextSession;
+    }
+
+    session = nextSession;
+    if (!session && options.requireSession !== false) {
+      throw new Error("Your session expired. Refresh and sign in again.");
+    }
+    return session;
+  })();
+
+  try {
+    return await authResyncInFlight;
+  } finally {
+    authResyncInFlight = null;
+  }
+}
+
+async function handleSessionResyncOnFocus() {
+  if (!supabaseClient) return;
+  try {
+    const previousUserId = session?.user?.id || null;
+    const nextSession = await ensureActiveSession({ requireSession: false });
+    if (!nextSession) {
+      if (previousUserId) {
+        teardownProjectRealtimeSubscription();
+        currentProfile = null;
+        projects = [];
+        saveSelectedProject("");
+        resetProjectState();
+        renderApp();
+      }
+      return;
+    }
+
+    if (previousUserId !== nextSession.user?.id) {
+      await loadCurrentProfile();
+      await loadProjects();
+      return;
+    }
+
+    if (selectedProjectId) {
+      await loadProjectData({ silent: true });
+    }
+  } catch (error) {
+    console.error("Session resync failed", error);
+  }
 }
 
 function showRefreshBanner(message = "This project changed. Refresh to load the latest updates.") {
@@ -1667,7 +1734,8 @@ async function loadProjectData(options = {}) {
 }
 
 async function upsertTasks(taskIds) {
-  if (!supabaseClient || !session || !selectedProjectId || !taskIds.length) return;
+  if (!supabaseClient || !selectedProjectId || !taskIds.length) return;
+  await ensureActiveSession();
   refreshTaskPositions();
   const rows = taskIds
     .map((taskId) => {
@@ -1682,6 +1750,7 @@ async function upsertTasks(taskIds) {
 
 async function replaceTaskAssignee(taskId) {
   if (!supabaseClient || !selectedProjectId) return;
+  await ensureActiveSession();
   const { error: deleteError } = await supabaseClient.from("task_assignees").delete().eq("task_id", taskId);
   if (deleteError) throw deleteError;
   const next = state.assignees.find((entry) => entry.task_id === taskId);
@@ -1692,6 +1761,7 @@ async function replaceTaskAssignee(taskId) {
 
 async function replaceTaskDependency(taskId) {
   if (!supabaseClient || !selectedProjectId) return;
+  await ensureActiveSession();
   const { error: deleteError } = await supabaseClient.from("task_dependencies").delete().eq("task_id", taskId);
   if (deleteError) throw deleteError;
   const next = state.dependencies.find((entry) => entry.task_id === taskId);
@@ -1702,18 +1772,21 @@ async function replaceTaskDependency(taskId) {
 
 async function insertTaskComment(comment) {
   if (!supabaseClient || !comment) return;
+  await ensureActiveSession();
   const { error } = await supabaseClient.from("task_comments").insert(comment);
   if (error) throw error;
 }
 
 async function deleteTasksByIds(taskIds) {
   if (!supabaseClient || !taskIds.length) return;
+  await ensureActiveSession();
   const { error } = await supabaseClient.from("tasks").delete().in("id", taskIds);
   if (error) throw error;
 }
 
 async function saveTaskFields(taskIds, message, rerender = true) {
-  if (!supabaseClient || !session || !selectedProjectId) return;
+  if (!supabaseClient || !selectedProjectId) return;
+  await ensureActiveSession();
   saveLocalState();
   setSyncStatus("Saving...");
   try {
@@ -1730,7 +1803,8 @@ async function saveTaskFields(taskIds, message, rerender = true) {
 }
 
 async function persistProjectDataNow(message, rerender = true) {
-  if (!supabaseClient || !session || !selectedProjectId) return;
+  if (!supabaseClient || !selectedProjectId) return;
+  await ensureActiveSession();
 
   syncParentCompletion();
   refreshTaskPositions();
@@ -2124,6 +2198,14 @@ async function initializeAuth() {
       saveSelectedProject("");
       resetProjectState();
       renderApp();
+    }
+  });
+  window.addEventListener("focus", () => {
+    void handleSessionResyncOnFocus();
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      void handleSessionResyncOnFocus();
     }
   });
 }
