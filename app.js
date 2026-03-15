@@ -1,4 +1,5 @@
 const STORAGE_KEY = "capstone-collab-tracker-v1";
+const PENDING_OPS_KEY = "capstone-pending-ops-v1";
 const SELECT_NONE = "__none__";
 
 const defaultState = {
@@ -125,7 +126,12 @@ let availableAuthProfiles = [];
 // Write queue: keyed Map so the latest value for each task wins before flush
 const pendingOps = new Map();
 let flushTimer = null;
+let flushQueuedAt = null; // when the first op in the current batch was enqueued
+let flushInProgress = false; // prevents concurrent flush calls
+const MAX_FLUSH_DELAY_MS = 3000; // force flush after 3s even if user is still typing
+const FLUSH_TIMEOUT_MS = 10000; // abort a hung flush after 10s
 let consistencyReloadTimer = null;
+let syncHideTimer = null;
 let authResyncInFlight = null;
 
 function loadLocalState() {
@@ -144,6 +150,82 @@ function saveLocalState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
+// ── Pending-ops persistence ───────────────────────────────────────────────────
+// Serialises the write queue to localStorage so edits survive a page refresh.
+// On next load, replayPendingOps() re-enqueues them and the flush retries.
+
+function savePendingOps() {
+  const ops = [...pendingOps.values()];
+  const upserts = ops
+    .filter((op) => op.type === "upsert")
+    .map((op) => {
+      const task = state.tasks.find((t) => t.id === op.taskId);
+      return task ? { taskId: op.taskId, taskData: structuredClone(task) } : null;
+    })
+    .filter(Boolean);
+  const deletes = ops
+    .filter((op) => op.type === "delete")
+    .map((op) => ({ taskIds: op.taskIds }));
+  if (upserts.length || deletes.length) {
+    localStorage.setItem(PENDING_OPS_KEY, JSON.stringify({ projectId: selectedProjectId, upserts, deletes }));
+  } else {
+    localStorage.removeItem(PENDING_OPS_KEY);
+  }
+}
+
+function clearPendingOpsStorage() {
+  localStorage.removeItem(PENDING_OPS_KEY);
+}
+
+function replayPendingOps() {
+  const raw = localStorage.getItem(PENDING_OPS_KEY);
+  if (!raw) return;
+  let stored;
+  try {
+    stored = JSON.parse(raw);
+  } catch {
+    localStorage.removeItem(PENDING_OPS_KEY);
+    return;
+  }
+  // Only replay ops that belong to the currently-loaded project
+  if (!stored || stored.projectId !== selectedProjectId) return;
+  const { upserts = [], deletes = [] } = stored;
+  if (!upserts.length && !deletes.length) return;
+
+  for (const { taskId, taskData } of upserts) {
+    const index = getTaskIndex(taskId);
+    if (index >= 0 && taskData) {
+      // Restore the edited task data that the server never received
+      state.tasks[index] = { ...state.tasks[index], ...taskData };
+    }
+    if (getTaskIndex(taskId) >= 0) {
+      pendingOps.set(`upsert:${taskId}`, { type: "upsert", taskId, retries: 0 });
+    }
+  }
+
+  for (const { taskIds } of deletes) {
+    // Server may have reloaded these tasks — remove them from state again
+    const idsSet = new Set(taskIds);
+    state.tasks = state.tasks.filter((t) => !idsSet.has(t.id));
+    state.assignees = state.assignees.filter((e) => !idsSet.has(e.task_id));
+    state.dependencies = state.dependencies.filter(
+      (e) => !idsSet.has(e.task_id) && !idsSet.has(e.depends_on_task_id)
+    );
+    state.comments = state.comments.filter((e) => !idsSet.has(e.task_id));
+    // No snapshot on replay — if this delete fails again, state will be stale
+    // and the user will see the error banner again
+    pendingOps.set(`delete:${taskIds.join(",")}`, { type: "delete", taskIds, snapshot: null, retries: 0 });
+  }
+
+  if (pendingOps.size > 0) {
+    refreshTaskPositions();
+    saveLocalState();
+    renderApp();
+    setSyncStatus("Resuming unsaved changes...");
+    scheduleFlush(0);
+  }
+}
+
 function saveSelectedProject(projectId) {
   selectedProjectId = projectId;
   localStorage.setItem("capstone-selected-project-id", projectId || "");
@@ -155,6 +237,8 @@ function resetProjectState() {
   pendingOps.clear();
   window.clearTimeout(flushTimer);
   flushTimer = null;
+  flushQueuedAt = null;
+  flushInProgress = false;
   expandedDetailTaskIds.clear();
   hideRefreshBanner();
   if (dom.linksPanel) dom.linksPanel.hidden = true;
@@ -248,6 +332,7 @@ function enqueueUpsert(taskId) {
   if ([...pendingOps.values()].some((op) => op.type === "delete" && op.taskIds.includes(taskId))) return;
   pendingOps.set(`upsert:${taskId}`, { type: "upsert", taskId, retries: 0 });
   setSyncStatus("Saving...");
+  savePendingOps();
   scheduleFlush();
 }
 
@@ -257,47 +342,71 @@ function enqueueDelete(taskIds, snapshot) {
   taskIds.forEach((id) => pendingOps.delete(`upsert:${id}`));
   pendingOps.set(`delete:${taskIds.join(",")}`, { type: "delete", taskIds, snapshot, retries: 0 });
   setSyncStatus("Saving...");
+  savePendingOps();
   scheduleFlush();
 }
 
 function scheduleFlush(delayMs = 800) {
+  // Record when the first op in this batch arrived
+  if (flushQueuedAt === null) flushQueuedAt = Date.now();
+  // Cap the delay so "Saving..." never gets stuck if the user types non-stop
+  const elapsed = Date.now() - flushQueuedAt;
+  const cappedDelay = Math.max(0, Math.min(delayMs, MAX_FLUSH_DELAY_MS - elapsed));
   window.clearTimeout(flushTimer);
-  flushTimer = window.setTimeout(flush, delayMs);
+  flushTimer = window.setTimeout(flush, cappedDelay);
 }
 
 async function flush() {
+  flushQueuedAt = null;
+
+  // If a flush is already running, schedule a follow-up so those ops aren't lost
+  if (flushInProgress) {
+    scheduleFlush(500);
+    return;
+  }
   if (!supabaseClient || !selectedProjectId || !pendingOps.size) return;
+
+  flushInProgress = true;
 
   // Drain current ops — new ops that arrive during the async work get their own flush
   const ops = [...pendingOps.values()];
   pendingOps.clear();
 
   try {
-    await ensureActiveSession();
+    // Wrap the entire network work in a timeout so a hung request can't freeze
+    // the indicator forever.
+    await withTimeout(
+      (async () => {
+        await ensureActiveSession();
 
-    const upsertOps = ops.filter((op) => op.type === "upsert");
-    const deleteOps = ops.filter((op) => op.type === "delete");
+        const upsertOps = ops.filter((op) => op.type === "upsert");
+        const deleteOps = ops.filter((op) => op.type === "delete");
 
-    if (upsertOps.length) {
-      refreshTaskPositions();
-      const rows = upsertOps
-        .map((op) => {
-          const index = getTaskIndex(op.taskId);
-          return index >= 0 ? buildTaskRowForDb(state.tasks[index], index) : null;
-        })
-        .filter(Boolean);
-      if (rows.length) {
-        const { error } = await supabaseClient.from("tasks").upsert(rows, { onConflict: "id" });
-        if (error) throw error;
-      }
-    }
+        if (upsertOps.length) {
+          refreshTaskPositions();
+          const rows = upsertOps
+            .map((op) => {
+              const index = getTaskIndex(op.taskId);
+              return index >= 0 ? buildTaskRowForDb(state.tasks[index], index) : null;
+            })
+            .filter(Boolean);
+          if (rows.length) {
+            const { error } = await supabaseClient.from("tasks").upsert(rows, { onConflict: "id" });
+            if (error) throw error;
+          }
+        }
 
-    for (const op of deleteOps) {
-      const { error } = await supabaseClient.from("tasks").delete().in("id", op.taskIds);
-      if (error) throw error;
-    }
+        for (const op of deleteOps) {
+          const { error } = await supabaseClient.from("tasks").delete().in("id", op.taskIds);
+          if (error) throw error;
+        }
+      })(),
+      FLUSH_TIMEOUT_MS,
+      "Save"
+    );
 
     await broadcastProjectChanged("A teammate updated this project. Refresh to load the latest changes.");
+    clearPendingOpsStorage();
     setSyncStatus("Saved");
     refreshTaskModalIfOpen();
     scheduleConsistencyReload();
@@ -326,12 +435,20 @@ async function flush() {
     }
 
     if (pendingOps.size > 0) {
+      savePendingOps();
       const backoffMs = Math.min(1000 * 2 ** (ops[0]?.retries ?? 1), 16000);
       setSyncStatus("Retrying...");
       scheduleFlush(backoffMs);
     } else if (anyExhausted) {
-      setSyncStatus(`Save failed: ${error.message}`, true);
+      // ops exhausted — data is still in localStorage from when they were enqueued,
+      // so a refresh will recover and retry them automatically
+      showRefreshBanner("Some changes couldn't be saved. Click Refresh to retry.");
+      setSyncStatus("Save failed — click Refresh to retry", true);
     }
+  } finally {
+    flushInProgress = false;
+    // If new ops arrived while this flush was running, make sure they get flushed
+    if (pendingOps.size > 0) scheduleFlush(0);
   }
 }
 
@@ -343,17 +460,32 @@ function formatDisplayDate(value) {
 }
 
 function setSyncStatus(message, isError = false) {
+  window.clearTimeout(syncHideTimer);
+
   dom.syncStatus.textContent = message;
   dom.syncStatus.dataset.error = isError ? "true" : "false";
+
   const lowerMessage = String(message || "").toLowerCase();
+  let state;
   if (isError) {
-    dom.syncStatus.dataset.state = "error";
-  } else if (lowerMessage.includes("saving") || lowerMessage.includes("creating")) {
-    dom.syncStatus.dataset.state = "saving";
+    state = "error";
+  } else if (lowerMessage.includes("saving") || lowerMessage.includes("creating") || lowerMessage.includes("retrying") || lowerMessage.includes("resuming")) {
+    state = "saving";
   } else if (lowerMessage.includes("loading")) {
-    dom.syncStatus.dataset.state = "loading";
+    state = "loading";
   } else {
-    dom.syncStatus.dataset.state = "success";
+    state = "success";
+  }
+  dom.syncStatus.dataset.state = state;
+
+  // Always show the toast when there's a new message
+  dom.syncStatus.dataset.visible = "true";
+
+  // Auto-hide after 2.5 s for success states — errors stay until the next update
+  if (state === "success") {
+    syncHideTimer = window.setTimeout(() => {
+      dom.syncStatus.dataset.visible = "false";
+    }, 2500);
   }
 }
 
@@ -1814,6 +1946,8 @@ async function loadProjectData(options = {}) {
 
   if (!silent) setSyncStatus("Synced");
   renderApp();
+  // After loading fresh data, replay any ops that failed to save before a refresh
+  if (!silent) replayPendingOps();
 }
 
 async function replaceTaskAssignee(taskId) {
@@ -2213,6 +2347,7 @@ async function handleSignOut() {
   projects = [];
   saveSelectedProject("");
   resetProjectState();
+  clearPendingOpsStorage();
   setSyncStatus("Signed out");
   renderApp();
 }
@@ -2429,6 +2564,15 @@ dom.exportBtn.addEventListener("click", () => {
 dom.resetDataBtn.addEventListener("click", async () => {
   resetProjectState();
   await persistProjectData("Project reset");
+});
+
+// Warn the user if they try to close or refresh the tab while a save is pending.
+// Modern browsers show a generic "Leave site? Changes may not be saved." dialog.
+window.addEventListener("beforeunload", (event) => {
+  if (pendingOps.size > 0 || flushInProgress) {
+    event.preventDefault();
+    event.returnValue = "";
+  }
 });
 
 initializeAuth();

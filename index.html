@@ -48,7 +48,6 @@
           </div>
           <div class="header-actions">
             <span id="userEmail" class="user-chip"></span>
-            <span id="syncStatus" class="sync-chip">Signed out</span>
             <button id="openProfileModalBtn" class="text-button" type="button">Profile</button>
             <button id="resetDataBtn" class="text-button" type="button">Reset</button>
             <button id="exportBtn" class="text-button" type="button">Export</button>
@@ -284,6 +283,9 @@
         <div id="dueSoonModalBody" class="modal-form"></div>
       </section>
     </div>
+
+    <!-- Fixed save-status toast — sits outside the app card so nothing clips it -->
+    <div id="syncStatus" class="sync-toast" data-state="success" data-visible="false"></div>
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="./config.js"></script>
