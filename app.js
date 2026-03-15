@@ -122,10 +122,9 @@ let activeTaskModalId = null;
 let activeMemberSettingsUserId = null;
 let currentProfile = null;
 let availableAuthProfiles = [];
-let persistQueue = Promise.resolve();
-const taskSaveQueues = new Map();
-const titleSaveTimers = new Map();
-const titleSaveVersions = new Map();
+// Write queue: keyed Map so the latest value for each task wins before flush
+const pendingOps = new Map();
+let flushTimer = null;
 let consistencyReloadTimer = null;
 let authResyncInFlight = null;
 
@@ -153,8 +152,9 @@ function saveSelectedProject(projectId) {
 function resetProjectState() {
   state = structuredClone(defaultState);
   projectLinks = [];
-  titleSaveTimers.forEach((timerId) => window.clearTimeout(timerId));
-  titleSaveTimers.clear();
+  pendingOps.clear();
+  window.clearTimeout(flushTimer);
+  flushTimer = null;
   expandedDetailTaskIds.clear();
   hideRefreshBanner();
   if (dom.linksPanel) dom.linksPanel.hidden = true;
@@ -233,31 +233,106 @@ function scheduleConsistencyReload(delayMs = 1800) {
   }, delayMs);
 }
 
-async function saveTaskWithRetry(taskId, attempts = 2) {
-  return queueTaskSave(taskId, async () => {
-    let lastError = null;
-    for (let attempt = 1; attempt <= attempts; attempt += 1) {
-      const taskSnapshot = cloneTaskSnapshot(taskId);
-      try {
-        await withTimeout(upsertTasks([taskId]), 8000, "Task save");
-        return;
-      } catch (error) {
-        lastError = error;
-        if (attempt === attempts) break;
-        const isTimeout = String(error?.message || "").toLowerCase().includes("timed out");
-        if (isTimeout) {
-          try {
-            await loadProjectData({ silent: true });
-            restoreTaskSnapshot(taskSnapshot);
-          } catch (reloadError) {
-            console.error("Recovery reload failed", reloadError);
-          }
-        }
-        await new Promise((resolve) => window.setTimeout(resolve, 300));
+// ── Write Queue ──────────────────────────────────────────────────────────────
+// Centralises all task writes. Each action updates in-memory state immediately
+// (optimistic UI), then enqueues an op. A single debounced flush batches all
+// pending upserts into one DB round-trip and retries with exponential backoff.
+
+function opKey(op) {
+  return op.type === "upsert" ? `upsert:${op.taskId}` : `delete:${op.taskIds.join(",")}`;
+}
+
+function enqueueUpsert(taskId) {
+  if (!supabaseClient || !selectedProjectId) return;
+  // Don't re-add a task that's already queued for deletion
+  if ([...pendingOps.values()].some((op) => op.type === "delete" && op.taskIds.includes(taskId))) return;
+  pendingOps.set(`upsert:${taskId}`, { type: "upsert", taskId, retries: 0 });
+  setSyncStatus("Saving...");
+  scheduleFlush();
+}
+
+function enqueueDelete(taskIds, snapshot) {
+  if (!supabaseClient || !selectedProjectId) return;
+  // Remove any pending upserts for tasks that are being deleted
+  taskIds.forEach((id) => pendingOps.delete(`upsert:${id}`));
+  pendingOps.set(`delete:${taskIds.join(",")}`, { type: "delete", taskIds, snapshot, retries: 0 });
+  setSyncStatus("Saving...");
+  scheduleFlush();
+}
+
+function scheduleFlush(delayMs = 800) {
+  window.clearTimeout(flushTimer);
+  flushTimer = window.setTimeout(flush, delayMs);
+}
+
+async function flush() {
+  if (!supabaseClient || !selectedProjectId || !pendingOps.size) return;
+
+  // Drain current ops — new ops that arrive during the async work get their own flush
+  const ops = [...pendingOps.values()];
+  pendingOps.clear();
+
+  try {
+    await ensureActiveSession();
+
+    const upsertOps = ops.filter((op) => op.type === "upsert");
+    const deleteOps = ops.filter((op) => op.type === "delete");
+
+    if (upsertOps.length) {
+      refreshTaskPositions();
+      const rows = upsertOps
+        .map((op) => {
+          const index = getTaskIndex(op.taskId);
+          return index >= 0 ? buildTaskRowForDb(state.tasks[index], index) : null;
+        })
+        .filter(Boolean);
+      if (rows.length) {
+        const { error } = await supabaseClient.from("tasks").upsert(rows, { onConflict: "id" });
+        if (error) throw error;
       }
     }
-    throw lastError;
-  });
+
+    for (const op of deleteOps) {
+      const { error } = await supabaseClient.from("tasks").delete().in("id", op.taskIds);
+      if (error) throw error;
+    }
+
+    await broadcastProjectChanged("A teammate updated this project. Refresh to load the latest changes.");
+    setSyncStatus("Saved");
+    refreshTaskModalIfOpen();
+    scheduleConsistencyReload();
+
+  } catch (error) {
+    console.error("Flush error:", error);
+    let anyExhausted = false;
+
+    for (const op of ops) {
+      if (op.retries < 3) {
+        op.retries += 1;
+        pendingOps.set(opKey(op), op);
+      } else {
+        anyExhausted = true;
+        if (op.type === "delete" && op.snapshot) {
+          // Rollback the optimistic delete — all retries exhausted
+          state.tasks = op.snapshot.tasks;
+          state.assignees = op.snapshot.assignees;
+          state.dependencies = op.snapshot.dependencies;
+          state.comments = op.snapshot.comments;
+          refreshTaskPositions();
+          saveLocalState();
+          renderApp();
+        }
+      }
+    }
+
+    if (pendingOps.size > 0) {
+      const backoffMs = Math.min(1000 * 2 ** (ops[0]?.retries ?? 1), 16000);
+      setSyncStatus("Retrying...");
+      scheduleFlush(backoffMs);
+    } else if (anyExhausted) {
+      setSyncStatus(`Save failed: ${error.message}`, true);
+    }
+  }
 }
 
 function formatDisplayDate(value) {
@@ -299,13 +374,32 @@ async function ensureActiveSession(options = {}) {
   }
 
   authResyncInFlight = (async () => {
+    // If the session token is expired or expiring within 60 seconds, force a
+    // refresh. This covers tabs that were idle long enough for the browser to
+    // throttle Supabase's autoRefreshToken timer.
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const expiresAt = session?.expires_at ?? 0;
+    const isExpiredOrExpiring = expiresAt - nowSeconds < 60;
+
+    if (isExpiredOrExpiring) {
+      const { data: refreshData, error: refreshError } = await supabaseClient.auth.refreshSession();
+      if (!refreshError && refreshData.session) {
+        session = refreshData.session;
+        if (!session && options.requireSession !== false) {
+          throw new Error("Your session expired. Please sign in again.");
+        }
+        return session;
+      }
+      // If refresh fails, fall through to getSession as a last resort
+    }
+
     const { data, error } = await supabaseClient.auth.getSession();
     if (error) throw error;
 
     const nextSession = data.session || null;
     session = nextSession;
     if (!session && options.requireSession !== false) {
-      throw new Error("Your session expired. Refresh and sign in again.");
+      throw new Error("Your session expired. Please sign in again.");
     }
     return session;
   })();
@@ -1053,43 +1147,24 @@ function wireTaskRow(row, task, index) {
     autoResizeTextarea(event.target);
     task.title = event.target.value;
     saveLocalState();
-    const existingTimer = titleSaveTimers.get(task.id);
-    if (existingTimer) window.clearTimeout(existingTimer);
-    const nextVersion = (titleSaveVersions.get(task.id) || 0) + 1;
-    titleSaveVersions.set(task.id, nextVersion);
-    const cursorPosition = event.target.selectionStart;
-    const timerId = window.setTimeout(async () => {
-      titleSaveTimers.delete(task.id);
-      if (titleSaveVersions.get(task.id) !== nextVersion) return;
-      setSyncStatus("Saving...");
-      try {
-        await saveTaskWithRetry(task.id, 2);
-        await broadcastProjectChanged("A teammate updated this project. Refresh to load the latest changes.");
-        if (titleSaveVersions.get(task.id) === nextVersion) {
-          setSyncStatus("Task saved");
-          scheduleConsistencyReload();
-        }
-      } catch (error) {
-        console.error(error);
-        if (titleSaveVersions.get(task.id) === nextVersion) setSyncStatus(`Save failed: ${error.message}`, true);
-      }
-      requestAnimationFrame(() => focusTaskTitle(task.id, cursorPosition));
-    }, 5000);
-    titleSaveTimers.set(task.id, timerId);
+    enqueueUpsert(task.id);
   });
 
-  row.querySelector(".task-check").addEventListener("change", async (event) => {
+  row.querySelector(".task-check").addEventListener("change", (event) => {
     task.status = event.target.checked ? "done" : "not_started";
     task.completed_date = event.target.checked ? task.completed_date || todayISO() : "";
     task.completed_by = event.target.checked ? session?.user?.id || null : null;
     syncParentCompletion();
+    saveLocalState();
     const changedTaskIds = [task.id, ...getAncestorIndexes(index).map((ancestorIndex) => state.tasks[ancestorIndex].id)];
-    await saveTaskFields(changedTaskIds, "Task updated");
+    changedTaskIds.forEach(enqueueUpsert);
   });
 
-  row.querySelector(".collapse-button").addEventListener("click", async () => {
+  row.querySelector(".collapse-button").addEventListener("click", () => {
     task.collapsed = !task.collapsed;
-    await persistProjectData(task.collapsed ? "Subtasks collapsed" : "Subtasks expanded");
+    saveLocalState();
+    renderApp();
+    enqueueUpsert(task.id);
   });
 
   const commentBadge = row.querySelector(".task-comment-badge");
@@ -1117,38 +1192,43 @@ function wireTaskRow(row, task, index) {
   });
 
   row.querySelector(".outdent-button").disabled = task.level === 0;
-  row.querySelector(".outdent-button").addEventListener("click", async () => {
+  row.querySelector(".outdent-button").addEventListener("click", () => {
     task.level = Math.max(0, task.level - 1);
-    await persistProjectData("Task outdented");
+    saveLocalState();
+    renderApp();
+    enqueueUpsert(task.id);
   });
 
   row.querySelector(".indent-action").disabled = index === 0;
-  row.querySelector(".indent-action").addEventListener("click", async () => {
+  row.querySelector(".indent-action").addEventListener("click", () => {
     if (index <= 0) return;
     const maxLevel = state.tasks[index - 1].level + 1;
     task.level = Math.min(task.level + 1, maxLevel);
-    await persistProjectData("Task indented");
+    saveLocalState();
+    renderApp();
+    enqueueUpsert(task.id);
   });
 
-  row.querySelector(".inline-delete-task-button").addEventListener("click", async () => {
+  row.querySelector(".inline-delete-task-button").addEventListener("click", () => {
+    const snapshot = {
+      tasks: structuredClone(state.tasks),
+      assignees: structuredClone(state.assignees),
+      dependencies: structuredClone(state.dependencies),
+      comments: structuredClone(state.comments),
+    };
     const deletedTaskIds = deleteTask(index);
     saveLocalState();
     renderApp();
-    setSyncStatus("Saving...");
-    try {
-      await deleteTasksByIds(deletedTaskIds);
-      await broadcastProjectChanged("A teammate updated this project. Refresh to load the latest changes.");
-      setSyncStatus("Task deleted");
-      scheduleConsistencyReload();
-    } catch (error) {
-      console.error(error);
-      setSyncStatus(`Save failed: ${error.message}`, true);
-    }
+    enqueueDelete(deletedTaskIds, snapshot);
   });
 
-  row.querySelector(".inline-add-subtask-button").addEventListener("click", async () => {
+  row.querySelector(".inline-add-subtask-button").addEventListener("click", () => {
     addSubtask(index);
+    saveLocalState();
     renderApp();
+    // Positions may have shifted for all tasks after the insertion point,
+    // so enqueue every task so the DB stays consistent.
+    state.tasks.forEach((t) => enqueueUpsert(t.id));
     const parent = state.tasks[index];
     const nextTask = state.tasks[index + 1];
     if (nextTask && nextTask.level === parent.level + 1) {
@@ -1271,12 +1351,13 @@ function refreshTaskModalIfOpen() {
 }
 
 function wireTaskModal(task) {
-  dom.taskModalBody.querySelector(".task-description-input").addEventListener("input", async (event) => {
+  dom.taskModalBody.querySelector(".task-description-input").addEventListener("input", (event) => {
     task.description = event.target.value;
-    await saveTaskFields([task.id], "Description saved", false);
+    saveLocalState();
+    enqueueUpsert(task.id);
   });
 
-  dom.taskModalBody.querySelector(".task-status-input").addEventListener("change", async (event) => {
+  dom.taskModalBody.querySelector(".task-status-input").addEventListener("change", (event) => {
     task.status = event.target.value;
     task.completed_date = task.status === "done" ? task.completed_date || todayISO() : "";
     task.completed_by = task.status === "done" ? task.completed_by || session?.user?.id || null : null;
@@ -1285,42 +1366,51 @@ function wireTaskModal(task) {
       task.completed_by = null;
     }
     syncParentCompletion();
+    saveLocalState();
+    renderApp();
     const taskIndex = getTaskIndex(task.id);
     const changedTaskIds = [task.id, ...getAncestorIndexes(taskIndex).map((ancestorIndex) => state.tasks[ancestorIndex].id)];
-    await saveTaskFields(changedTaskIds, "Status saved");
+    changedTaskIds.forEach(enqueueUpsert);
   });
 
-  dom.taskModalBody.querySelector(".task-priority-input").addEventListener("change", async (event) => {
+  dom.taskModalBody.querySelector(".task-priority-input").addEventListener("change", (event) => {
     task.priority = event.target.value;
-    await saveTaskFields([task.id], "Priority saved", false);
+    saveLocalState();
+    enqueueUpsert(task.id);
   });
 
-  dom.taskModalBody.querySelector(".task-due-input").addEventListener("input", async (event) => {
+  dom.taskModalBody.querySelector(".task-due-input").addEventListener("input", (event) => {
     task.due_date = event.target.value;
-    await saveTaskFields([task.id], "Due date saved", false);
+    saveLocalState();
+    enqueueUpsert(task.id);
   });
 
-  dom.taskModalBody.querySelector(".task-done-input").addEventListener("input", async (event) => {
+  dom.taskModalBody.querySelector(".task-done-input").addEventListener("input", (event) => {
     task.completed_date = event.target.value;
     task.status = event.target.value ? "done" : "not_started";
     task.completed_by = event.target.value ? task.completed_by || session?.user?.id || null : null;
     if (!event.target.value) task.completed_by = null;
     syncParentCompletion();
+    saveLocalState();
+    renderApp();
     const taskIndex = getTaskIndex(task.id);
     const changedTaskIds = [task.id, ...getAncestorIndexes(taskIndex).map((ancestorIndex) => state.tasks[ancestorIndex].id)];
-    await saveTaskFields(changedTaskIds, "Completion saved");
+    changedTaskIds.forEach(enqueueUpsert);
   });
 
-  dom.taskModalBody.querySelector(".task-milestone-input").addEventListener("change", async (event) => {
+  dom.taskModalBody.querySelector(".task-milestone-input").addEventListener("change", (event) => {
     task.milestone_id = event.target.value === SELECT_NONE ? null : event.target.value;
-    await saveTaskFields([task.id], "Milestone saved", false);
+    saveLocalState();
+    enqueueUpsert(task.id);
   });
 
+  // Assignee and dependency use separate join tables — go direct to DB with session refresh
   dom.taskModalBody.querySelector(".task-assignee-input").addEventListener("change", async (event) => {
     setTaskAssignee(task.id, event.target.value === SELECT_NONE ? null : event.target.value);
     saveLocalState();
     setSyncStatus("Saving...");
     try {
+      await ensureActiveSession();
       await replaceTaskAssignee(task.id);
       await broadcastProjectChanged("A teammate updated this project. Refresh to load the latest changes.");
       setSyncStatus("Assignee saved");
@@ -1338,6 +1428,7 @@ function wireTaskModal(task) {
     saveLocalState();
     setSyncStatus("Saving...");
     try {
+      await ensureActiveSession();
       await replaceTaskDependency(task.id);
       await broadcastProjectChanged("A teammate updated this project. Refresh to load the latest changes.");
       setSyncStatus("Dependency saved");
@@ -1367,6 +1458,7 @@ function wireTaskModal(task) {
     saveLocalState();
     setSyncStatus("Saving...");
     try {
+      await ensureActiveSession();
       await insertTaskComment(newComment);
       await broadcastProjectChanged("A teammate updated this project. Refresh to load the latest changes.");
       setSyncStatus("Comment added");
@@ -1429,9 +1521,6 @@ function deleteTask(index) {
   const idsToDelete = new Set(state.tasks.slice(index, index + deleteCount).map((task) => task.id));
   idsToDelete.forEach((taskId) => {
     expandedDetailTaskIds.delete(taskId);
-    const timerId = titleSaveTimers.get(taskId);
-    if (timerId) window.clearTimeout(timerId);
-    titleSaveTimers.delete(taskId);
   });
   state.tasks.splice(index, deleteCount);
   state.assignees = state.assignees.filter((entry) => !idsToDelete.has(entry.task_id));
@@ -1470,18 +1559,6 @@ function restoreTaskSnapshot(taskSnapshot) {
   refreshTaskPositions();
   saveLocalState();
   renderApp();
-}
-
-function queueTaskSave(taskId, operation) {
-  const previous = taskSaveQueues.get(taskId) || Promise.resolve();
-  const next = previous.catch(() => undefined).then(operation);
-  taskSaveQueues.set(taskId, next);
-  next.finally(() => {
-    if (taskSaveQueues.get(taskId) === next) {
-      taskSaveQueues.delete(taskId);
-    }
-  });
-  return next;
 }
 
 function getTaskIndex(taskId) {
@@ -1739,21 +1816,6 @@ async function loadProjectData(options = {}) {
   renderApp();
 }
 
-async function upsertTasks(taskIds) {
-  if (!supabaseClient || !selectedProjectId || !taskIds.length) return;
-  await ensureActiveSession();
-  refreshTaskPositions();
-  const rows = taskIds
-    .map((taskId) => {
-      const index = getTaskIndex(taskId);
-      return index >= 0 ? buildTaskRowForDb(state.tasks[index], index) : null;
-    })
-    .filter(Boolean);
-  if (!rows.length) return;
-  const { error } = await supabaseClient.from("tasks").upsert(rows, { onConflict: "id" });
-  if (error) throw error;
-}
-
 async function replaceTaskAssignee(taskId) {
   if (!supabaseClient || !selectedProjectId) return;
   await ensureActiveSession();
@@ -1783,30 +1845,6 @@ async function insertTaskComment(comment) {
   if (error) throw error;
 }
 
-async function deleteTasksByIds(taskIds) {
-  if (!supabaseClient || !taskIds.length) return;
-  await ensureActiveSession();
-  const { error } = await supabaseClient.from("tasks").delete().in("id", taskIds);
-  if (error) throw error;
-}
-
-async function saveTaskFields(taskIds, message, rerender = true) {
-  if (!supabaseClient || !selectedProjectId) return;
-  await ensureActiveSession();
-  saveLocalState();
-  setSyncStatus("Saving...");
-  try {
-    await withTimeout(upsertTasks(taskIds), 8000, "Task save");
-    await broadcastProjectChanged("A teammate updated this project. Refresh to load the latest changes.");
-    setSyncStatus(message || "Synced");
-    refreshTaskModalIfOpen();
-    if (rerender) renderApp();
-    scheduleConsistencyReload();
-  } catch (error) {
-    console.error(error);
-    setSyncStatus(`Save failed: ${error.message}`, true);
-  }
-}
 
 async function persistProjectDataNow(message, rerender = true) {
   if (!supabaseClient || !selectedProjectId) return;
@@ -1883,11 +1921,14 @@ async function persistProjectDataNow(message, rerender = true) {
   }
 }
 
+// Serial queue for full-project saves (milestones, meetings, structural ops).
+// Kept separate from the task write queue so they don't interleave.
+let _persistQueue = Promise.resolve();
 function persistProjectData(message, rerender = true) {
-  persistQueue = persistQueue
+  _persistQueue = _persistQueue
     .catch(() => {})
     .then(() => persistProjectDataNow(message, rerender));
-  return persistQueue;
+  return _persistQueue;
 }
 
 async function createProject(name) {
@@ -2212,6 +2253,8 @@ async function initializeAuth() {
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") {
       void handleSessionResyncOnFocus();
+      // Flush any ops that were queued while the tab was hidden
+      if (pendingOps.size > 0) scheduleFlush(0);
     }
   });
 }
@@ -2293,14 +2336,16 @@ dom.addLinkForm.addEventListener("submit", async (event) => {
 
 // ── End Useful Links ─────────────────────────────────────────────────────────
 
-dom.newTaskForm.addEventListener("submit", async (event) => {
+dom.newTaskForm.addEventListener("submit", (event) => {
   event.preventDefault();
   const title = dom.newTaskTitle.value.trim();
   if (!title || !selectedProjectId) return;
   const task = createTask(title, 0);
   state.tasks.push(task);
   dom.newTaskTitle.value = "";
-  await saveTaskFields([task.id], "Task added");
+  saveLocalState();
+  renderApp();
+  enqueueUpsert(task.id);
   requestAnimationFrame(() => focusTaskTitle(task.id, task.title.length));
 });
 
