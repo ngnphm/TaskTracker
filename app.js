@@ -99,7 +99,13 @@ const supabaseUrl = localSupabaseConfig.url || "";
 const supabaseAnonKey = localSupabaseConfig.anonKey || "";
 const supabaseClient =
   window.supabase && supabaseUrl && supabaseAnonKey
-    ? window.supabase.createClient(supabaseUrl, supabaseAnonKey)
+    ? window.supabase.createClient(supabaseUrl, supabaseAnonKey, {
+        auth: {
+          persistSession: true,
+          autoRefreshToken: true,
+          detectSessionInUrl: true
+        }
+      })
     : null;
 
 let session = null;
@@ -115,6 +121,11 @@ const realtimeClientId = crypto.randomUUID();
 let activeTaskModalId = null;
 let activeMemberSettingsUserId = null;
 let currentProfile = null;
+let availableAuthProfiles = [];
+let persistQueue = Promise.resolve();
+const titleSaveTimers = new Map();
+const titleSaveVersions = new Map();
+let consistencyReloadTimer = null;
 
 function loadLocalState() {
   const saved = localStorage.getItem(STORAGE_KEY);
@@ -140,6 +151,8 @@ function saveSelectedProject(projectId) {
 function resetProjectState() {
   state = structuredClone(defaultState);
   projectLinks = [];
+  titleSaveTimers.forEach((timerId) => window.clearTimeout(timerId));
+  titleSaveTimers.clear();
   expandedDetailTaskIds.clear();
   hideRefreshBanner();
   if (dom.linksPanel) dom.linksPanel.hidden = true;
@@ -190,6 +203,49 @@ function nullableDateValue(value) {
   return normalized || null;
 }
 
+function withTimeout(promise, timeoutMs, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      window.setTimeout(() => reject(new Error(`${label} timed out`)), timeoutMs);
+    })
+  ]);
+}
+
+function scheduleConsistencyReload(delayMs = 1800) {
+  if (consistencyReloadTimer) {
+    window.clearTimeout(consistencyReloadTimer);
+  }
+  consistencyReloadTimer = window.setTimeout(async () => {
+    consistencyReloadTimer = null;
+    const activeElement = document.activeElement;
+    if (
+      activeElement?.classList?.contains("task-title-input") ||
+      activeElement?.classList?.contains("task-description-input") ||
+      activeElement?.classList?.contains("comment-input")
+    ) {
+      scheduleConsistencyReload(1200);
+      return;
+    }
+    await loadProjectData({ silent: true });
+  }, delayMs);
+}
+
+async function saveTaskWithRetry(taskId, attempts = 2) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      await withTimeout(upsertTasks([taskId]), 8000, "Task save");
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt === attempts) break;
+      await new Promise((resolve) => window.setTimeout(resolve, 300));
+    }
+  }
+  throw lastError;
+}
+
 function formatDisplayDate(value) {
   const normalized = normalizeDateValue(value);
   if (!normalized) return "";
@@ -200,6 +256,16 @@ function formatDisplayDate(value) {
 function setSyncStatus(message, isError = false) {
   dom.syncStatus.textContent = message;
   dom.syncStatus.dataset.error = isError ? "true" : "false";
+  const lowerMessage = String(message || "").toLowerCase();
+  if (isError) {
+    dom.syncStatus.dataset.state = "error";
+  } else if (lowerMessage.includes("saving") || lowerMessage.includes("creating")) {
+    dom.syncStatus.dataset.state = "saving";
+  } else if (lowerMessage.includes("loading")) {
+    dom.syncStatus.dataset.state = "loading";
+  } else {
+    dom.syncStatus.dataset.state = "success";
+  }
 }
 
 function setAuthStatus(message, isError = false) {
@@ -908,17 +974,42 @@ function wireTaskRow(row, task, index) {
     autoResizeTextarea(titleInput);
     requestAnimationFrame(() => autoResizeTextarea(titleInput));
   });
-  titleInput.addEventListener("input", async (event) => {
+  titleInput.addEventListener("input", (event) => {
     autoResizeTextarea(event.target);
     task.title = event.target.value;
-    await persistProjectData("Task updated", false);
+    saveLocalState();
+    const existingTimer = titleSaveTimers.get(task.id);
+    if (existingTimer) window.clearTimeout(existingTimer);
+    const nextVersion = (titleSaveVersions.get(task.id) || 0) + 1;
+    titleSaveVersions.set(task.id, nextVersion);
+    const cursorPosition = event.target.selectionStart;
+    const timerId = window.setTimeout(async () => {
+      titleSaveTimers.delete(task.id);
+      if (titleSaveVersions.get(task.id) !== nextVersion) return;
+      setSyncStatus("Saving...");
+      try {
+        await saveTaskWithRetry(task.id, 2);
+        await broadcastProjectChanged("A teammate updated this project. Refresh to load the latest changes.");
+        if (titleSaveVersions.get(task.id) === nextVersion) {
+          setSyncStatus("Task saved");
+          scheduleConsistencyReload();
+        }
+      } catch (error) {
+        console.error(error);
+        if (titleSaveVersions.get(task.id) === nextVersion) setSyncStatus(`Save failed: ${error.message}`, true);
+      }
+      requestAnimationFrame(() => focusTaskTitle(task.id, cursorPosition));
+    }, 450);
+    titleSaveTimers.set(task.id, timerId);
   });
 
   row.querySelector(".task-check").addEventListener("change", async (event) => {
     task.status = event.target.checked ? "done" : "not_started";
     task.completed_date = event.target.checked ? task.completed_date || todayISO() : "";
     task.completed_by = event.target.checked ? session?.user?.id || null : null;
-    await persistProjectData("Task updated");
+    syncParentCompletion();
+    const changedTaskIds = [task.id, ...getAncestorIndexes(index).map((ancestorIndex) => state.tasks[ancestorIndex].id)];
+    await saveTaskFields(changedTaskIds, "Task updated");
   });
 
   row.querySelector(".collapse-button").addEventListener("click", async () => {
@@ -965,13 +1056,29 @@ function wireTaskRow(row, task, index) {
   });
 
   row.querySelector(".inline-delete-task-button").addEventListener("click", async () => {
-    deleteTask(index);
-    await persistProjectData("Task deleted");
+    const deletedTaskIds = deleteTask(index);
+    saveLocalState();
+    renderApp();
+    setSyncStatus("Saving...");
+    try {
+      await deleteTasksByIds(deletedTaskIds);
+      await broadcastProjectChanged("A teammate updated this project. Refresh to load the latest changes.");
+      setSyncStatus("Task deleted");
+      scheduleConsistencyReload();
+    } catch (error) {
+      console.error(error);
+      setSyncStatus(`Save failed: ${error.message}`, true);
+    }
   });
 
   row.querySelector(".inline-add-subtask-button").addEventListener("click", async () => {
     addSubtask(index);
-    await persistProjectData("Sub-task added");
+    renderApp();
+    const parent = state.tasks[index];
+    const nextTask = state.tasks[index + 1];
+    if (nextTask && nextTask.level === parent.level + 1) {
+      requestAnimationFrame(() => focusTaskTitle(nextTask.id, 0));
+    }
   });
 }
 
@@ -1091,7 +1198,7 @@ function refreshTaskModalIfOpen() {
 function wireTaskModal(task) {
   dom.taskModalBody.querySelector(".task-description-input").addEventListener("input", async (event) => {
     task.description = event.target.value;
-    await persistProjectData("Description saved", false);
+    await saveTaskFields([task.id], "Description saved", false);
   });
 
   dom.taskModalBody.querySelector(".task-status-input").addEventListener("change", async (event) => {
@@ -1102,17 +1209,20 @@ function wireTaskModal(task) {
       task.completed_date = "";
       task.completed_by = null;
     }
-    await persistProjectData("Status saved");
+    syncParentCompletion();
+    const taskIndex = getTaskIndex(task.id);
+    const changedTaskIds = [task.id, ...getAncestorIndexes(taskIndex).map((ancestorIndex) => state.tasks[ancestorIndex].id)];
+    await saveTaskFields(changedTaskIds, "Status saved");
   });
 
   dom.taskModalBody.querySelector(".task-priority-input").addEventListener("change", async (event) => {
     task.priority = event.target.value;
-    await persistProjectData("Priority saved", false);
+    await saveTaskFields([task.id], "Priority saved", false);
   });
 
   dom.taskModalBody.querySelector(".task-due-input").addEventListener("input", async (event) => {
     task.due_date = event.target.value;
-    await persistProjectData("Due date saved", false);
+    await saveTaskFields([task.id], "Due date saved", false);
   });
 
   dom.taskModalBody.querySelector(".task-done-input").addEventListener("input", async (event) => {
@@ -1120,22 +1230,49 @@ function wireTaskModal(task) {
     task.status = event.target.value ? "done" : "not_started";
     task.completed_by = event.target.value ? task.completed_by || session?.user?.id || null : null;
     if (!event.target.value) task.completed_by = null;
-    await persistProjectData("Completion saved");
+    syncParentCompletion();
+    const taskIndex = getTaskIndex(task.id);
+    const changedTaskIds = [task.id, ...getAncestorIndexes(taskIndex).map((ancestorIndex) => state.tasks[ancestorIndex].id)];
+    await saveTaskFields(changedTaskIds, "Completion saved");
   });
 
   dom.taskModalBody.querySelector(".task-milestone-input").addEventListener("change", async (event) => {
     task.milestone_id = event.target.value === SELECT_NONE ? null : event.target.value;
-    await persistProjectData("Milestone saved", false);
+    await saveTaskFields([task.id], "Milestone saved", false);
   });
 
   dom.taskModalBody.querySelector(".task-assignee-input").addEventListener("change", async (event) => {
     setTaskAssignee(task.id, event.target.value === SELECT_NONE ? null : event.target.value);
-    await persistProjectData("Assignee saved", false);
+    saveLocalState();
+    setSyncStatus("Saving...");
+    try {
+      await replaceTaskAssignee(task.id);
+      await broadcastProjectChanged("A teammate updated this project. Refresh to load the latest changes.");
+      setSyncStatus("Assignee saved");
+      refreshTaskModalIfOpen();
+      renderApp();
+      scheduleConsistencyReload();
+    } catch (error) {
+      console.error(error);
+      setSyncStatus(`Save failed: ${error.message}`, true);
+    }
   });
 
   dom.taskModalBody.querySelector(".task-dependency-input").addEventListener("change", async (event) => {
     setTaskDependency(task.id, event.target.value === SELECT_NONE ? null : event.target.value);
-    await persistProjectData("Dependency saved", false);
+    saveLocalState();
+    setSyncStatus("Saving...");
+    try {
+      await replaceTaskDependency(task.id);
+      await broadcastProjectChanged("A teammate updated this project. Refresh to load the latest changes.");
+      setSyncStatus("Dependency saved");
+      refreshTaskModalIfOpen();
+      renderApp();
+      scheduleConsistencyReload();
+    } catch (error) {
+      console.error(error);
+      setSyncStatus(`Save failed: ${error.message}`, true);
+    }
   });
 
   dom.taskModalBody.querySelector(".comment-form").addEventListener("submit", async (event) => {
@@ -1151,7 +1288,20 @@ function wireTaskModal(task) {
       created_at: new Date().toISOString()
     });
     input.value = "";
-    await persistProjectData("Comment added");
+    const newComment = state.comments[state.comments.length - 1];
+    saveLocalState();
+    setSyncStatus("Saving...");
+    try {
+      await insertTaskComment(newComment);
+      await broadcastProjectChanged("A teammate updated this project. Refresh to load the latest changes.");
+      setSyncStatus("Comment added");
+      refreshTaskModalIfOpen();
+      renderApp();
+      scheduleConsistencyReload();
+    } catch (error) {
+      console.error(error);
+      setSyncStatus(`Save failed: ${error.message}`, true);
+    }
   });
 }
 
@@ -1202,7 +1352,12 @@ function deleteTask(index) {
     deleteCount += 1;
   }
   const idsToDelete = new Set(state.tasks.slice(index, index + deleteCount).map((task) => task.id));
-  idsToDelete.forEach((taskId) => expandedDetailTaskIds.delete(taskId));
+  idsToDelete.forEach((taskId) => {
+    expandedDetailTaskIds.delete(taskId);
+    const timerId = titleSaveTimers.get(taskId);
+    if (timerId) window.clearTimeout(timerId);
+    titleSaveTimers.delete(taskId);
+  });
   state.tasks.splice(index, deleteCount);
   state.assignees = state.assignees.filter((entry) => !idsToDelete.has(entry.task_id));
   state.dependencies = state.dependencies.filter(
@@ -1210,12 +1365,45 @@ function deleteTask(index) {
   );
   state.comments = state.comments.filter((entry) => !idsToDelete.has(entry.task_id));
   refreshTaskPositions();
+  return [...idsToDelete];
 }
 
 function refreshTaskPositions() {
   state.tasks.forEach((task, index) => {
     task.position = index;
   });
+}
+
+function getTaskIndex(taskId) {
+  return state.tasks.findIndex((task) => task.id === taskId);
+}
+
+function getAncestorIndexes(taskIndex) {
+  const task = state.tasks[taskIndex];
+  if (!task) return [];
+  const ancestors = [];
+  let currentLevel = task.level;
+  for (let index = taskIndex - 1; index >= 0; index -= 1) {
+    const candidate = state.tasks[index];
+    if (candidate.level < currentLevel) {
+      ancestors.unshift(index);
+      currentLevel = candidate.level;
+      if (currentLevel === 0) break;
+    }
+  }
+  return ancestors;
+}
+
+function buildTaskRowForDb(task, index = getTaskIndex(task.id)) {
+  return {
+    ...task,
+    due_date: nullableDateValue(task.due_date),
+    completed_date: nullableDateValue(task.completed_date),
+    completed_by: task.completed_by || null,
+    project_id: selectedProjectId,
+    position: index,
+    parent_task_id: null
+  };
 }
 
 function setTaskAssignee(taskId, userId) {
@@ -1233,15 +1421,7 @@ function setTaskDependency(taskId, dependencyId) {
 }
 
 function taskRowsForDb() {
-  return state.tasks.map((task, index) => ({
-    ...task,
-    due_date: nullableDateValue(task.due_date),
-    completed_date: nullableDateValue(task.completed_date),
-    completed_by: task.completed_by || null,
-    project_id: selectedProjectId,
-    position: index,
-    parent_task_id: null
-  }));
+  return state.tasks.map((task, index) => buildTaskRowForDb(task, index));
 }
 
 async function loadProjects() {
@@ -1297,13 +1477,17 @@ function setupProjectRealtimeSubscription() {
 
 async function broadcastProjectChanged(message) {
   if (!projectChannel) return;
-  await projectChannel.send({
-    type: "broadcast",
-    event: "project-updated",
-    payload: {
-      senderId: realtimeClientId,
-      message: message || "This project changed. Refresh to load the latest updates."
-    }
+  Promise.resolve(
+    projectChannel.send({
+      type: "broadcast",
+      event: "project-updated",
+      payload: {
+        senderId: realtimeClientId,
+        message: message || "This project changed. Refresh to load the latest updates."
+      }
+    })
+  ).catch((error) => {
+    console.error("Broadcast failed", error);
   });
 }
 
@@ -1316,14 +1500,15 @@ async function acceptPendingInvitations() {
   }
 }
 
-async function loadProjectData() {
+async function loadProjectData(options = {}) {
   if (!supabaseClient || !session || !selectedProjectId) {
     resetProjectState();
     renderApp();
     return;
   }
 
-  setSyncStatus("Loading project...");
+  const silent = Boolean(options.silent);
+  if (!silent) setSyncStatus("Loading project...");
   hideRefreshBanner();
 
   const [
@@ -1429,11 +1614,74 @@ async function loadProjectData() {
   }));
   projectLinks = linksResult.data || [];
 
-  setSyncStatus("Synced");
+  if (!silent) setSyncStatus("Synced");
   renderApp();
 }
 
-async function persistProjectData(message, rerender = true) {
+async function upsertTasks(taskIds) {
+  if (!supabaseClient || !session || !selectedProjectId || !taskIds.length) return;
+  refreshTaskPositions();
+  const rows = taskIds
+    .map((taskId) => {
+      const index = getTaskIndex(taskId);
+      return index >= 0 ? buildTaskRowForDb(state.tasks[index], index) : null;
+    })
+    .filter(Boolean);
+  if (!rows.length) return;
+  const { error } = await supabaseClient.from("tasks").upsert(rows, { onConflict: "id" });
+  if (error) throw error;
+}
+
+async function replaceTaskAssignee(taskId) {
+  if (!supabaseClient || !selectedProjectId) return;
+  const { error: deleteError } = await supabaseClient.from("task_assignees").delete().eq("task_id", taskId);
+  if (deleteError) throw deleteError;
+  const next = state.assignees.find((entry) => entry.task_id === taskId);
+  if (!next) return;
+  const { error: insertError } = await supabaseClient.from("task_assignees").insert(next);
+  if (insertError) throw insertError;
+}
+
+async function replaceTaskDependency(taskId) {
+  if (!supabaseClient || !selectedProjectId) return;
+  const { error: deleteError } = await supabaseClient.from("task_dependencies").delete().eq("task_id", taskId);
+  if (deleteError) throw deleteError;
+  const next = state.dependencies.find((entry) => entry.task_id === taskId);
+  if (!next) return;
+  const { error: insertError } = await supabaseClient.from("task_dependencies").insert(next);
+  if (insertError) throw insertError;
+}
+
+async function insertTaskComment(comment) {
+  if (!supabaseClient || !comment) return;
+  const { error } = await supabaseClient.from("task_comments").insert(comment);
+  if (error) throw error;
+}
+
+async function deleteTasksByIds(taskIds) {
+  if (!supabaseClient || !taskIds.length) return;
+  const { error } = await supabaseClient.from("tasks").delete().in("id", taskIds);
+  if (error) throw error;
+}
+
+async function saveTaskFields(taskIds, message, rerender = true) {
+  if (!supabaseClient || !session || !selectedProjectId) return;
+  saveLocalState();
+  setSyncStatus("Saving...");
+  try {
+    await withTimeout(upsertTasks(taskIds), 8000, "Task save");
+    await broadcastProjectChanged("A teammate updated this project. Refresh to load the latest changes.");
+    setSyncStatus(message || "Synced");
+    refreshTaskModalIfOpen();
+    if (rerender) renderApp();
+    scheduleConsistencyReload();
+  } catch (error) {
+    console.error(error);
+    setSyncStatus(`Save failed: ${error.message}`, true);
+  }
+}
+
+async function persistProjectDataNow(message, rerender = true) {
   if (!supabaseClient || !session || !selectedProjectId) return;
 
   syncParentCompletion();
@@ -1505,6 +1753,13 @@ async function persistProjectData(message, rerender = true) {
     console.error(error);
     setSyncStatus(`Save failed: ${error.message}`, true);
   }
+}
+
+function persistProjectData(message, rerender = true) {
+  persistQueue = persistQueue
+    .catch(() => {})
+    .then(() => persistProjectDataNow(message, rerender));
+  return persistQueue;
 }
 
 async function createProject(name) {
@@ -1906,9 +2161,11 @@ dom.newTaskForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const title = dom.newTaskTitle.value.trim();
   if (!title || !selectedProjectId) return;
-  state.tasks.push(createTask(title, 0));
+  const task = createTask(title, 0);
+  state.tasks.push(task);
   dom.newTaskTitle.value = "";
-  await persistProjectData("Task added");
+  await saveTaskFields([task.id], "Task added");
+  requestAnimationFrame(() => focusTaskTitle(task.id, task.title.length));
 });
 
 dom.authForm.addEventListener("submit", handleAuthSubmit);
