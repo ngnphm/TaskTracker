@@ -123,6 +123,7 @@ let activeMemberSettingsUserId = null;
 let currentProfile = null;
 let availableAuthProfiles = [];
 let persistQueue = Promise.resolve();
+const taskSaveQueues = new Map();
 const titleSaveTimers = new Map();
 const titleSaveVersions = new Map();
 let consistencyReloadTimer = null;
@@ -232,18 +233,30 @@ function scheduleConsistencyReload(delayMs = 1800) {
 }
 
 async function saveTaskWithRetry(taskId, attempts = 2) {
-  let lastError = null;
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    try {
-      await withTimeout(upsertTasks([taskId]), 8000, "Task save");
-      return;
-    } catch (error) {
-      lastError = error;
-      if (attempt === attempts) break;
-      await new Promise((resolve) => window.setTimeout(resolve, 300));
+  return queueTaskSave(taskId, async () => {
+    let lastError = null;
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      const taskSnapshot = cloneTaskSnapshot(taskId);
+      try {
+        await withTimeout(upsertTasks([taskId]), 8000, "Task save");
+        return;
+      } catch (error) {
+        lastError = error;
+        if (attempt === attempts) break;
+        const isTimeout = String(error?.message || "").toLowerCase().includes("timed out");
+        if (isTimeout) {
+          try {
+            await loadProjectData({ silent: true });
+            restoreTaskSnapshot(taskSnapshot);
+          } catch (reloadError) {
+            console.error("Recovery reload failed", reloadError);
+          }
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 300));
+      }
     }
-  }
-  throw lastError;
+    throw lastError;
+  });
 }
 
 function formatDisplayDate(value) {
@@ -999,7 +1012,7 @@ function wireTaskRow(row, task, index) {
         if (titleSaveVersions.get(task.id) === nextVersion) setSyncStatus(`Save failed: ${error.message}`, true);
       }
       requestAnimationFrame(() => focusTaskTitle(task.id, cursorPosition));
-    }, 450);
+    }, 5000);
     titleSaveTimers.set(task.id, timerId);
   });
 
@@ -1372,6 +1385,41 @@ function refreshTaskPositions() {
   state.tasks.forEach((task, index) => {
     task.position = index;
   });
+}
+
+function cloneTaskSnapshot(taskId) {
+  const index = getTaskIndex(taskId);
+  if (index < 0) return null;
+  return structuredClone(state.tasks[index]);
+}
+
+function restoreTaskSnapshot(taskSnapshot) {
+  if (!taskSnapshot) return;
+  const existingIndex = getTaskIndex(taskSnapshot.id);
+  if (existingIndex >= 0) {
+    state.tasks[existingIndex] = {
+      ...state.tasks[existingIndex],
+      ...taskSnapshot
+    };
+  } else {
+    const insertAt = Math.max(0, Math.min(taskSnapshot.position ?? state.tasks.length, state.tasks.length));
+    state.tasks.splice(insertAt, 0, taskSnapshot);
+  }
+  refreshTaskPositions();
+  saveLocalState();
+  renderApp();
+}
+
+function queueTaskSave(taskId, operation) {
+  const previous = taskSaveQueues.get(taskId) || Promise.resolve();
+  const next = previous.catch(() => undefined).then(operation);
+  taskSaveQueues.set(taskId, next);
+  next.finally(() => {
+    if (taskSaveQueues.get(taskId) === next) {
+      taskSaveQueues.delete(taskId);
+    }
+  });
+  return next;
 }
 
 function getTaskIndex(taskId) {
