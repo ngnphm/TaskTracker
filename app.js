@@ -287,6 +287,11 @@ function setAuthStatus(message, isError = false) {
   dom.authStatus.dataset.error = isError ? "true" : "false";
 }
 
+function isSupabaseLockError(error) {
+  const message = String(error?.message || error || "").toLowerCase();
+  return message.includes("lock was stolen by another request");
+}
+
 async function ensureActiveSession(options = {}) {
   if (!supabaseClient) return null;
   if (authResyncInFlight) {
@@ -297,17 +302,7 @@ async function ensureActiveSession(options = {}) {
     const { data, error } = await supabaseClient.auth.getSession();
     if (error) throw error;
 
-    let nextSession = data.session || null;
-    const expiresAt = Number(nextSession?.expires_at || 0);
-    const nowSeconds = Math.floor(Date.now() / 1000);
-    const shouldRefresh = nextSession && expiresAt > 0 && expiresAt - nowSeconds < 120;
-
-    if (shouldRefresh) {
-      const refreshResult = await supabaseClient.auth.refreshSession();
-      if (refreshResult.error) throw refreshResult.error;
-      nextSession = refreshResult.data.session || nextSession;
-    }
-
+    const nextSession = data.session || null;
     session = nextSession;
     if (!session && options.requireSession !== false) {
       throw new Error("Your session expired. Refresh and sign in again.");
@@ -1623,6 +1618,7 @@ async function loadProjectData(options = {}) {
   }
 
   const silent = Boolean(options.silent);
+  const retryAttempt = Number(options.retryAttempt || 0);
   if (!silent) setSyncStatus("Loading project...");
   hideRefreshBanner();
 
@@ -1669,6 +1665,11 @@ async function loadProjectData(options = {}) {
     (result) => result.error
   );
   if (hasError) {
+    if (retryAttempt < 1 && isSupabaseLockError(hasError.error)) {
+      await new Promise((resolve) => window.setTimeout(resolve, 250));
+      await loadProjectData({ ...options, retryAttempt: retryAttempt + 1 });
+      return;
+    }
     console.error(hasError.error);
     setSyncStatus(`Could not load project data: ${hasError.error.message}`, true);
     return;
@@ -1700,6 +1701,11 @@ async function loadProjectData(options = {}) {
     (result) => result.error
   );
   if (secondaryError) {
+    if (retryAttempt < 1 && isSupabaseLockError(secondaryError.error)) {
+      await new Promise((resolve) => window.setTimeout(resolve, 250));
+      await loadProjectData({ ...options, retryAttempt: retryAttempt + 1 });
+      return;
+    }
     console.error(secondaryError.error);
     setSyncStatus(`Could not load related data: ${secondaryError.error.message}`, true);
     return;
